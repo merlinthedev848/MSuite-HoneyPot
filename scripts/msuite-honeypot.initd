@@ -1,0 +1,15 @@
+#!/sbin/openrc-run
+
+name="msuite-honeypot"
+description="MSuite HoneyPot Server & MikroTik Nullrouter"
+command="/usr/local/bin/msuite-honeypot"
+command_args="-config /etc/msuite-honeypot/config.json"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/msuite-honeypot.log"
+error_log="/var/log/msuite-honeypot.err"
+
+depend() {
+	need net
+	after firewall
+}

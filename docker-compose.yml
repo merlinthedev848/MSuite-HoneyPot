@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  msuite-honeypot:
+    image: msuite-honeypot:latest
+    build: .
+    container_name: msuite-honeypot
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # Honeypot ingress for Nginx
+      - "8081:8081" # Web Dashboard
+    environment:
+      - MIKROTIK_HOST=192.168.88.1
+      - MIKROTIK_PORT=443
+      - MIKROTIK_USER=admin
+      - MIKROTIK_PASS=YourMikroTikPasswordHere
+      - MIKROTIK_USE_SSL=true
+      - MIKROTIK_LIST=MSuite-Blacklist
+      - MIKROTIK_TIMEOUT=7d
+    volumes:
+      - ./config.json:/etc/msuite-honeypot/config.json:ro

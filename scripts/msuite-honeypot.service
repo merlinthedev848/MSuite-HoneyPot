@@ -1,0 +1,18 @@
+[Unit]
+Description=MSuite HoneyPot Server & MikroTik Nullrouter
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/msuite-honeypot -config /etc/msuite-honeypot/config.json
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

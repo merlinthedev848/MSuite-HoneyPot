@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MSuite HoneyPot - Live Threat Defense</title>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-red: #ef4444;
+            --accent-green: #22c55e;
+            --accent-blue: #38bdf8;
+            --accent-amber: #f59e0b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-primary); padding: 20px; line-height: 1.5; }
+        .container { max-width: 1300px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--border-color); margin-bottom: 24px; }
+        .logo-area { display: flex; align-items: center; gap: 12px; }
+        .logo-badge { background: linear-gradient(135deg, #ef4444, #b91c1c); padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
+        h1 { font-size: 22px; font-weight: 700; }
+        .status-pill { display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--card-bg); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-color); }
+        .indicator { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+        .indicator.offline { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
+        
+        .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; }
+        .card-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px; }
+        .card-value { font-size: 28px; font-weight: 800; }
+        .card-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+        .dashboard-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        @media (max-width: 900px) { .dashboard-layout { grid-template-columns: 1fr; } }
+
+        .feed-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .badge-live { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+        
+        .table-container { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 10px 12px; background: #162032; color: var(--text-secondary); position: sticky; top: 0; z-index: 10; font-weight: 600; }
+        td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        tr:hover { background-color: rgba(255,255,255,0.02); }
+        
+        .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: monospace; }
+        .tag-blocked { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.4); }
+        .tag-whitelisted { background: rgba(56, 189, 248, 0.2); color: var(--accent-blue); }
+        .method-get { color: var(--accent-green); font-weight: bold; }
+        .method-post { color: var(--accent-amber); font-weight: bold; }
+        
+        .btn { background: #2563eb; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: 0.2s; }
+        .btn:hover { background: #1d4ed8; }
+        .btn-danger { background: #dc2626; }
+        .btn-danger:hover { background: #b91c1c; }
+        
+        .list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+        .list-item-title { font-family: monospace; word-break: break-all; }
+        .list-item-count { background: #334155; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+
+        .manual-block-box { display: flex; gap: 8px; margin-top: 14px; }
+        .manual-block-box input { flex: 1; background: #0f172a; border: 1px solid var(--border-color); color: #fff; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-area">
+                <span class="logo-badge">MSUITE</span>
+                <h1>HoneyPot Threat Defense</h1>
+            </div>
+            <div class="status-pill">
+                <div class="indicator" id="mt-indicator"></div>
+                <span id="mt-status-text">Connecting to MikroTik...</span>
+            </div>
+        </header>
+
+        <div class="grid-stats">
+            <div class="card">
+                <div class="card-title">Attacks Intercepted</div>
+                <div class="card-value" id="stat-total">0</div>
+                <div class="card-sub">Total bot probe requests</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Threat IPs Nullrouted</div>
+                <div class="card-value" style="color: var(--accent-red);" id="stat-blocked">0</div>
+                <div class="card-sub">Active in MikroTik address-list</div>
+            </div>
+            <div class="card">
+                <div class="card-title">MikroTik Router</div>
+                <div class="card-value" style="font-size: 20px; font-family: monospace;" id="mt-model">RouterOS v7</div>
+                <div class="card-sub" id="mt-details">Uptime: -- | CPU: --%</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Target List Name</div>
+                <div class="card-value" style="font-size: 20px; color: var(--accent-amber);" id="stat-list">MSuite-Blacklist</div>
+                <div class="card-sub" id="stat-timeout">Timeout: 7d drop in prerouting</div>
+            </div>
+        </div>
+
+        <div class="dashboard-layout">
+            <!-- Left: Live Attack Feed -->
+            <div class="card">
+                <div class="feed-header">
+                    <h2>Live Intercepted Attacks</h2>
+                    <span class="badge-live">● REAL-TIME STREAM</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Attacker IP</th>
+                                <th>Method</th>
+                                <th>Path / Target</th>
+                                <th>Action</th>
+                                <th>User-Agent</th>
+                            </tr>
+                        </thead>
+                        <tbody id="attack-rows">
+                            <tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 30px;">Listening for incoming probes from Nginx...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right: Diagnostics & Top Targets -->
+            <div style="display: flex; flex-direction: column; gap: 20px;">
+                <!-- Manual Block -->
+                <div class="card">
+                    <div class="card-title">Manual MikroTik Block</div>
+                    <p style="font-size: 12px; color: var(--text-secondary);">Directly nullroute an IP into MikroTik firewall</p>
+                    <div class="manual-block-box">
+                        <input type="text" id="manual-ip-input" placeholder="e.g. 198.51.100.25">
+                        <button class="btn btn-danger" onclick="manualBlock()">Block IP</button>
+                    </div>
+                </div>
+
+                <!-- Top Probed Paths -->
+                <div class="card">
+                    <div class="card-title">Top Targeted Paths</div>
+                    <div id="top-paths-list">
+                        <div style="color: var(--text-secondary); font-size: 12px;">No attacks logged yet.</div>
+                    </div>
+                </div>
+
+                <!-- Top Attackers -->
+                <div class="card">
+                    <div class="card-title">Top Scanning IPs</div>
+                    <div id="top-ips-list">
+                        <div style="color: var(--text-secondary); font-size: 12px;">No IPs recorded yet.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateStats() {
+            fetch('/api/stats')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('stat-total').innerText = data.total_attacks || 0;
+                    document.getElementById('stat-blocked').innerText = data.blocked_ips_count || 0;
+                    
+                    // Top Paths
+                    const pathsDiv = document.getElementById('top-paths-list');
+                    if (data.top_paths && Object.keys(data.top_paths).length > 0) {
+                        pathsDiv.innerHTML = Object.entries(data.top_paths)
+                            .map(([k, v]) => `<div class="list-item"><span class="list-item-title">${escapeHtml(k)}</span><span class="list-item-count">${v}</span></div>`)
+                            .join('');
+                    }
+
+                    // Top IPs
+                    const ipsDiv = document.getElementById('top-ips-list');
+                    if (data.top_ips && Object.keys(data.top_ips).length > 0) {
+                        ipsDiv.innerHTML = Object.entries(data.top_ips)
+                            .map(([k, v]) => `<div class="list-item"><span class="list-item-title">${escapeHtml(k)}</span><button class="btn btn-danger" style="padding:2px 6px; font-size:10px;" onclick="unblockIP('${k}')">Unblock</button></div>`)
+                            .join('');
+                    }
+                }).catch(e => console.error(e));
+        }
+
+        function checkMikroTik() {
+            fetch('/api/mikrotik/status')
+                .then(r => r.json())
+                .then(data => {
+                    const ind = document.getElementById('mt-indicator');
+                    const txt = document.getElementById('mt-status-text');
+                    if (data.connected) {
+                        ind.classList.remove('offline');
+                        txt.innerText = 'MikroTik Connected (' + data.host + ')';
+                        document.getElementById('mt-model').innerText = (data.resource && data.resource.board) ? data.resource.board : 'RouterOS Connected';
+                        if (data.resource) {
+                            document.getElementById('mt-details').innerText = `Uptime: ${data.resource.uptime || '--'} | CPU: ${data.resource['cpu-load'] || '0'}%`;
+                        }
+                    } else {
+                        ind.classList.add('offline');
+                        txt.innerText = 'MikroTik Offline: ' + (data.error || 'Check credentials');
+                    }
+                    if (data.list_name) document.getElementById('stat-list').innerText = data.list_name;
+                    if (data.timeout) document.getElementById('stat-timeout').innerText = 'Timeout: ' + data.timeout + ' drop';
+                }).catch(e => console.error(e));
+        }
+
+        function prependAttackRow(ev) {
+            const tbody = document.getElementById('attack-rows');
+            if (tbody.children.length === 1 && tbody.children[0].children.length === 1) {
+                tbody.innerHTML = '';
+            }
+
+            const tr = document.createElement('tr');
+            const timeStr = new Date(ev.timestamp).toLocaleTimeString();
+            const actionTag = ev.blocked 
+                ? '<span class="tag tag-blocked">NULLROUTED</span>' 
+                : '<span class="tag tag-whitelisted">WHITELISTED</span>';
+            const methodClass = ev.method === 'POST' ? 'method-post' : 'method-get';
+
+            tr.innerHTML = `
+                <td style="color: var(--text-secondary);">${timeStr}</td>
+                <td><strong>${escapeHtml(ev.client_ip)}</strong></td>
+                <td><span class="${methodClass}">${escapeHtml(ev.method)}</span></td>
+                <td><span style="font-family: monospace; color: var(--accent-blue);">${escapeHtml(ev.path)}</span></td>
+                <td>${actionTag}</td>
+                <td style="color: var(--text-secondary); font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(ev.user_agent || 'Unknown')}</td>
+            `;
+
+            tbody.insertBefore(tr, tbody.firstChild);
+            if (tbody.children.length > 100) {
+                tbody.removeChild(tbody.lastChild);
+            }
+        }
+
+        function manualBlock() {
+            const ip = document.getElementById('manual-ip-input').value.trim();
+            if (!ip) return;
+            fetch('/api/block', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ip: ip, reason: 'Manual Block via Dashboard'})
+            }).then(r => r.json()).then(res => {
+                alert('IP ' + ip + ' added to MikroTik address-list!');
+                document.getElementById('manual-ip-input').value = '';
+                updateStats();
+            }).catch(e => alert('Error: ' + e));
+        }
+
+        function unblockIP(ip) {
+            if (!confirm('Unblock IP ' + ip + ' from MikroTik?')) return;
+            fetch('/api/unblock', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ip: ip})
+            }).then(r => r.json()).then(res => {
+                alert('IP ' + ip + ' unblocked!');
+                updateStats();
+            }).catch(e => alert('Error: ' + e));
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        // Setup SSE for Live Feed
+        function startSSE() {
+            const es = new EventSource('/api/stream');
+            es.onmessage = function(e) {
+                try {
+                    const ev = JSON.parse(e.data);
+                    prependAttackRow(ev);
+                    updateStats();
+                } catch(err) {}
+            };
+            es.onerror = function() {
+                setTimeout(startSSE, 3000);
+            };
+        }
+
+        // Init
+        updateStats();
+        checkMikroTik();
+        setInterval(updateStats, 10000);
+        setInterval(checkMikroTik, 30000);
+        startSSE();
+
+        // Load initial recent attacks
+        fetch('/api/events?limit=50')
+            .then(r => r.json())
+            .then(events => {
+                if (events && events.length > 0) {
+                    const tbody = document.getElementById('attack-rows');
+                    tbody.innerHTML = '';
+                    events.reverse().forEach(ev => prependAttackRow(ev));
+                }
+            });
+    </script>
+</body>
+</html>

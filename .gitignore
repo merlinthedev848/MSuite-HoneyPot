@@ -1,0 +1,4 @@
+msuite-honeypot.exe
+*.exe
+.DS_Store
+*.tmp

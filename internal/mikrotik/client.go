@@ -133,20 +133,52 @@ func (c *Client) BlockIP(ip, reason string) error {
 		return err
 	}
 
-	resp, respBody, err := c.do(http.MethodPost, "/ip/firewall/address-list", body)
+	// PUT is RouterOS "add". POST is a console command and does not create a
+	// row: the menu returns HTTP 200 with an empty list, which is not success.
+	resp, respBody, err := c.do(http.MethodPut, "/ip/firewall/address-list", body)
 	if err != nil {
 		return fmt.Errorf("mikrotik api request failed: %w", err)
 	}
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		if err := createdAddressList(respBody, c.cfg.MikroTikList, ip); err != nil {
+			return err
+		}
 		c.remember(ip)
 		log.Printf("[MikroTik] Successfully added %s to address-list '%s' (timeout: %s)", ip, c.cfg.MikroTikList, c.cfg.MikroTikTimeout)
 		return nil
 	}
-	if resp.StatusCode == http.StatusBadRequest && bytes.Contains(bytes.ToLower(respBody), []byte("already have")) {
+	if resp.StatusCode >= http.StatusBadRequest && bytes.Contains(bytes.ToLower(respBody), []byte("already have")) {
 		c.remember(ip)
 		return nil
 	}
-	return fmt.Errorf("mikrotik api error (HTTP %d): %s", resp.StatusCode, string(respBody))
+	msg := strings.TrimSpace(string(respBody))
+	if msg == "" {
+		msg = "empty response"
+	}
+	return fmt.Errorf("mikrotik api error (HTTP %d): %s", resp.StatusCode, msg)
+}
+
+// createdAddressList accepts only the object RouterOS returns after a PUT add.
+// An empty body, an empty list, or an error object is not a created row.
+func createdAddressList(body []byte, list, address string) error {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("[]")) || bytes.Equal(trimmed, []byte("{}")) {
+		return fmt.Errorf("mikrotik returned an empty response and did not create %s on list %s", address, list)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(trimmed, &rec); err != nil {
+		return fmt.Errorf("mikrotik did not return the created address-list entry for %s on list %s: %s", address, list, trimmed)
+	}
+	if _, isErr := rec["error"]; isErr {
+		return fmt.Errorf("mikrotik error: %s", trimmed)
+	}
+	if detail := strField(rec, "detail"); detail != "" {
+		return fmt.Errorf("mikrotik error: %s", detail)
+	}
+	if strField(rec, ".id") == "" || strField(rec, "list") != list || strField(rec, "address") != address {
+		return fmt.Errorf("mikrotik did not create %s on list %s: %s", address, list, trimmed)
+	}
+	return nil
 }
 
 // UnblockIP removes an IP from the MikroTik address-list.

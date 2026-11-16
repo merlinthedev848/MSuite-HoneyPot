@@ -141,7 +141,11 @@ func (h *DashboardHandler) handleBlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "blocked", "ip": req.IP})
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status": "blocked",
+		"ip":     req.IP,
+		"list":   h.cfg.MikroTikList,
+	})
 }
 
 func (h *DashboardHandler) handleUnblock(w http.ResponseWriter, r *http.Request) {

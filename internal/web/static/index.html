@@ -240,8 +240,12 @@
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ip: ip, reason: 'Manual Block via Dashboard'})
-            }).then(r => r.json()).then(res => {
-                alert('IP ' + ip + ' added to MikroTik address-list!');
+            }).then(r => r.json().then(res => ({ok: r.ok, res: res})).catch(() => ({ok: false, res: {}}))).then(({ok, res}) => {
+                if (!ok || !res || res.error || res.status !== 'blocked') {
+                    alert('MikroTik did not add ' + ip + ': ' + ((res && res.error) || 'empty response'));
+                    return;
+                }
+                alert('IP ' + ip + ' added to MikroTik address list ' + (res.list || 'MSuite-Blacklist'));
                 document.getElementById('manual-ip-input').value = '';
                 updateStats();
             }).catch(e => alert('Error: ' + e));

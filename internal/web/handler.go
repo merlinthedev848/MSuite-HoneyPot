@@ -1,15 +1,19 @@
 package web
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 	"github.com/merlinthedev848/msuite-honeypot/internal/mikrotik"
+	"github.com/merlinthedev848/msuite-honeypot/internal/nginxlog"
 	"github.com/merlinthedev848/msuite-honeypot/internal/store"
 )
 
@@ -46,6 +50,7 @@ func (h *DashboardHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mikrotik/status", h.handleMikroTikStatus)
 	mux.HandleFunc("/api/block", h.handleBlock)
 	mux.HandleFunc("/api/unblock", h.handleUnblock)
+	mux.HandleFunc("/api/import-log", h.handleImportLog)
 }
 
 func (h *DashboardHandler) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +132,7 @@ func (h *DashboardHandler) handleMikroTikStatus(w http.ResponseWriter, r *http.R
 	res, err := h.mtClient.TestConnection()
 	resp := map[string]interface{}{
 		"host":      h.cfg.MikroTikHost,
+		"port":      h.cfg.MikroTikPort,
 		"list_name": h.cfg.MikroTikList,
 		"timeout":   h.cfg.MikroTikTimeout,
 		"connected": err == nil,
@@ -137,6 +143,54 @@ func (h *DashboardHandler) handleMikroTikStatus(w http.ResponseWriter, r *http.R
 		resp["resource"] = res
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *DashboardHandler) handleImportLog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	reader, err := importBody(w, r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	sum := nginxlog.Summarize(reader, h.cfg.OwnAddresses, h.cfg.ParsedWhitelist)
+	result := nginxlog.Apply(sum, h.mtClient, h.store)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
+func importBody(w http.ResponseWriter, r *http.Request) (io.Reader, error) {
+	r.Body = http.MaxBytesReader(w, r.Body, 32<<20)
+	ct := r.Header.Get("Content-Type")
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			return nil, err
+		}
+		if f, _, err := r.FormFile("log"); err == nil {
+			defer f.Close()
+			buf, err := io.ReadAll(io.LimitReader(f, 32<<20))
+			if err != nil {
+				return nil, err
+			}
+			return bytes.NewReader(buf), nil
+		}
+		if text := r.FormValue("text"); strings.TrimSpace(text) != "" {
+			return strings.NewReader(text), nil
+		}
+		return nil, fmt.Errorf("paste a log or upload a file")
+	}
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(body.Text) == "" {
+		return nil, fmt.Errorf("paste a log or upload a file")
+	}
+	return strings.NewReader(body.Text), nil
 }
 
 type manualBlockReq struct {

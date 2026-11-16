@@ -71,6 +71,9 @@ type Store struct {
 	subsLock     sync.Mutex
 	ranges       map[string]*rangeAccum
 	routerBlocks []RouterBlock
+	reported     map[string]struct{}
+	statePath    string
+	saveMu       sync.Mutex
 }
 
 type rangeAccum struct {
@@ -96,6 +99,7 @@ func NewStore(maxEvents int) *Store {
 		uaStats:     make(map[string]int64),
 		subscribers: make(map[chan AttackEvent]struct{}),
 		ranges:      make(map[string]*rangeAccum),
+		reported:    make(map[string]struct{}),
 	}
 }
 
@@ -120,7 +124,9 @@ func (s *Store) AddEvent(event AttackEvent) AttackEvent {
 	}
 	s.events = append(s.events, event)
 	s.noteRange(event)
+	snap := s.snapshotLocked()
 	s.lock.Unlock()
+	s.writeSnapshot(snap)
 
 	// Broadcast to SSE subscribers
 	s.subsLock.Lock()
@@ -136,7 +142,7 @@ func (s *Store) AddEvent(event AttackEvent) AttackEvent {
 }
 
 // SetRouterBlocks replaces the dashboard copy of the MikroTik address list.
-// The attack log stays empty across a restart; this list is what remains on the router.
+// The address list itself still lives on the router. The attack feed is saved separately.
 func (s *Store) SetRouterBlocks(blocks []RouterBlock) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -207,6 +213,43 @@ func (s *Store) GetRanges() []NetworkRange {
 		out[i], out[best] = out[best], out[i]
 	}
 	return out
+}
+
+// DistinctIPsSince counts addresses seen in one WHOIS prefix at or after since.
+func (s *Store) DistinctIPsSince(cidr string, since time.Time) int {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	seen := make(map[string]struct{})
+	for _, ev := range s.events {
+		if ev.CIDR != cidr || ev.ClientIP == "" || ev.Timestamp.Before(since) {
+			continue
+		}
+		seen[ev.ClientIP] = struct{}{}
+	}
+	return len(seen)
+}
+
+// HasReported reports whether this address was already accepted by AbuseIPDB.
+func (s *Store) HasReported(ip string) bool {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	_, ok := s.reported[ip]
+	return ok
+}
+
+// MarkReported remembers a successful AbuseIPDB report and saves the feed.
+func (s *Store) MarkReported(ip string) {
+	if ip == "" {
+		return
+	}
+	s.lock.Lock()
+	if s.reported == nil {
+		s.reported = make(map[string]struct{})
+	}
+	s.reported[ip] = struct{}{}
+	snap := s.snapshotLocked()
+	s.lock.Unlock()
+	s.writeSnapshot(snap)
 }
 
 func (s *Store) GetRecentEvents(limit int) []AttackEvent {

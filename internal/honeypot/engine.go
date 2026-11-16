@@ -9,29 +9,52 @@ import (
 	"strings"
 	"time"
 
+	"github.com/merlinthedev848/msuite-honeypot/internal/abuseipdb"
 	"github.com/merlinthedev848/msuite-honeypot/internal/attrib"
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 	"github.com/merlinthedev848/msuite-honeypot/internal/mikrotik"
 	"github.com/merlinthedev848/msuite-honeypot/internal/store"
 )
 
+type ipBlocker interface {
+	BlockIP(ip, reason string) error
+}
+
+type ipReporter interface {
+	Report(ip string)
+}
+
 type Engine struct {
 	cfg      *config.Config
-	mtClient *mikrotik.Client
+	mtClient ipBlocker
 	store    *store.Store
 	attrib   *attrib.Cache
+	lookup   func(string) attrib.Info
+	report   ipReporter
 }
 
 func NewEngine(cfg *config.Config, mt *mikrotik.Client, st *store.Store, names *attrib.Cache) *Engine {
 	if names == nil {
 		names = attrib.NewCache()
 	}
-	return &Engine{
+	e := &Engine{
 		cfg:      cfg,
 		mtClient: mt,
 		store:    st,
 		attrib:   names,
 	}
+	e.lookup = func(ip string) attrib.Info {
+		if e.attrib == nil {
+			return attrib.Info{}
+		}
+		return e.attrib.Lookup(ip)
+	}
+	if cfg != nil {
+		if rep := abuseipdb.New(cfg.AbuseIPDBAPIKey, st); rep != nil {
+			e.report = rep
+		}
+	}
+	return e
 }
 
 // ExtractClientIP extracts the real external client IP from reverse proxy headers
@@ -136,8 +159,9 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var blocked bool
 	reason := fmt.Sprintf("%s %s (Host: %s)", method, path, host)
 
-	if !isWhitelisted && clientIP != "" && parsedIP != nil {
-		// Asynchronously or synchronously nullroute on MikroTik
+	if !isWhitelisted && clientIP != "" && parsedIP != nil && e.mtClient != nil {
+		// The single address is nullrouted immediately. A prefix is considered
+		// only after the WHOIS lookup, and only once several addresses qualify.
 		err := e.mtClient.BlockIP(clientIP, reason)
 		if err != nil {
 			log.Printf("[MikroTik Error] Could not block %s: %v", clientIP, err)
@@ -152,8 +176,8 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Attribution is best-effort and runs after the nullroute attempt.
 	// A DNS or WHOIS failure leaves the owner blank and still records the hit.
 	var owner, ptrName, org, netName, country, cidr, asn string
-	if parsedIP != nil && e.attrib != nil {
-		info := e.attrib.Lookup(clientIP)
+	if parsedIP != nil && e.lookup != nil {
+		info := e.lookup(clientIP)
 		owner = info.Owner()
 		ptrName = info.PTR
 		org = info.Org
@@ -184,6 +208,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		CIDR:      cidr,
 		ASN:       asn,
 	})
+
+	e.considerPrefix(cidr, isWhitelisted)
+	if e.report != nil && !isWhitelisted && parsedIP != nil && clientIP != "" {
+		ip := clientIP
+		go e.report.Report(ip)
+	}
 
 	// Tarpit delay if configured
 	if e.cfg.TarpitDelay > 0 {

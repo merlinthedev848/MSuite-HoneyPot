@@ -142,7 +142,13 @@ write_honeypot_config() {
   "mikrotik_user": "${user}",
   "mikrotik_password": "${pass}",
   "mikrotik_list": "${list}",
-  "mikrotik_timeout": "${timeout}"
+  "mikrotik_timeout": "${timeout}",
+  "nginx_access_log": "/var/log/nginx/access.log",
+  "own_addresses": ["10.0.0.194", "127.0.0.1", "::1"],
+  "state_path": "/var/lib/msuite-honeypot/state.json",
+  "abuseipdb_api_key": "",
+  "range_block_min_ips": 3,
+  "range_block_window": "15m"
 }
 EOF
 }

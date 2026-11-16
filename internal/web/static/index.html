@@ -17,51 +17,79 @@
             --accent-amber: #f59e0b;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
-        body { background-color: var(--bg-dark); color: var(--text-primary); padding: 20px; line-height: 1.5; }
-        .container { max-width: 1300px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 20px; border-bottom: 1px solid var(--border-color); margin-bottom: 24px; }
-        .logo-area { display: flex; align-items: center; gap: 12px; }
-        .logo-badge { background: linear-gradient(135deg, #ef4444, #b91c1c); padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 14px; letter-spacing: 1px; }
+        body { background-color: var(--bg-dark); color: var(--text-primary); padding: 24px; line-height: 1.5; }
+        .container { max-width: 1280px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--border-color); margin-bottom: 20px; }
+        .logo-area { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .logo-badge { background: linear-gradient(135deg, #ef4444, #b91c1c); padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 14px; letter-spacing: 1px; flex: none; }
         h1 { font-size: 22px; font-weight: 700; }
-        .status-pill { display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--card-bg); padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border-color); }
-        .indicator { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+        h2 { font-size: 16px; font-weight: 650; }
+        .status-pill { display: flex; align-items: center; gap: 8px; font-size: 13px; background: var(--card-bg); padding: 8px 14px; border-radius: 20px; border: 1px solid var(--border-color); flex: none; }
+        .indicator { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); flex: none; }
         .indicator.offline { background: var(--accent-red); box-shadow: 0 0 8px var(--accent-red); }
-        
-        .grid-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
-        .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 18px; }
-        .card-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px; }
-        .card-value { font-size: 28px; font-weight: 800; }
-        .card-sub { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
 
-        .dashboard-layout { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
-        @media (max-width: 900px) { .dashboard-layout { grid-template-columns: 1fr; } }
+        .grid-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+        .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px 18px; }
+        .stat-card { display: flex; flex-direction: column; min-height: 156px; }
+        .card-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); line-height: 1.4; }
+        .stat-card .card-title { min-height: 2.8em; }
+        .card-value { font-size: 28px; font-weight: 750; line-height: 1.25; margin-top: 8px; display: flex; align-items: flex-end; overflow-wrap: anywhere; }
+        .stat-card .card-value { min-height: 2.5em; }
+        .card-value.named { font-size: 20px; font-weight: 700; }
+        .card-value.danger { color: var(--accent-red); }
+        .card-value.amber { color: var(--accent-amber); }
+        .card-sub { font-size: 12px; color: var(--text-secondary); line-height: 1.4; margin-top: 10px; }
+        .stat-card .card-sub { min-height: 2.8em; }
 
-        .feed-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-        .badge-live { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
-        
-        .table-container { overflow-x: auto; max-height: 520px; overflow-y: auto; }
+        .stack { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+        .side-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+        .panel { display: flex; flex-direction: column; min-height: 220px; }
+        .panel-note { font-size: 12px; color: var(--text-secondary); margin-top: 4px; min-height: 1.4em; }
+        .panel-body { flex: 1; min-height: 112px; max-height: 280px; overflow: auto; margin-top: 10px; }
+
+        .feed-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+        .badge-live { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: bold; flex: none; }
+
+        .table-container { overflow: auto; max-height: 460px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; padding: 10px 12px; background: #162032; color: var(--text-secondary); position: sticky; top: 0; z-index: 10; font-weight: 600; }
-        td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        th { text-align: left; padding: 10px 12px; background: #162032; color: var(--text-secondary); position: sticky; top: 0; z-index: 10; font-weight: 600; white-space: nowrap; }
+        td { padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; }
         tr:hover { background-color: rgba(255,255,255,0.02); }
-        
+        .col-num { text-align: right; font-variant-numeric: tabular-nums; }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+        .path { color: var(--accent-blue); overflow-wrap: anywhere; }
+        .host { overflow-wrap: anywhere; }
+        .muted { color: var(--text-secondary); }
+        .ua { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 12px; }
+        .nowrap { white-space: nowrap; }
+
         .tag { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: monospace; }
         .tag-blocked { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid rgba(239, 68, 68, 0.4); }
         .tag-whitelisted { background: rgba(56, 189, 248, 0.2); color: var(--accent-blue); }
         .method-get { color: var(--accent-green); font-weight: bold; }
         .method-post { color: var(--accent-amber); font-weight: bold; }
-        
-        .btn { background: #2563eb; color: #fff; border: none; padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: 0.2s; }
+
+        .btn { background: #2563eb; color: #fff; border: none; padding: 8px 12px; border-radius: 4px; font-size: 12px; cursor: pointer; transition: 0.2s; }
         .btn:hover { background: #1d4ed8; }
         .btn-danger { background: #dc2626; }
         .btn-danger:hover { background: #b91c1c; }
-        
-        .list-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
-        .list-item-title { font-family: monospace; word-break: break-all; }
-        .list-item-count { background: #334155; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
 
-        .manual-block-box { display: flex; gap: 8px; margin-top: 14px; }
-        .manual-block-box input { flex: 1; background: #0f172a; border: 1px solid var(--border-color); color: #fff; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
+        .list-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+        .list-item-title { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+        .list-item-count { background: #334155; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; flex: none; }
+
+        .manual-block-box { display: flex; gap: 8px; margin-top: auto; padding-top: 14px; }
+        .manual-block-box input { flex: 1; min-width: 0; background: #0f172a; border: 1px solid var(--border-color); color: #fff; padding: 8px 12px; border-radius: 4px; font-size: 13px; }
+
+        @media (max-width: 1100px) {
+            .grid-stats { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 720px) {
+            body { padding: 16px; }
+            header { align-items: flex-start; flex-direction: column; }
+            .grid-stats, .side-grid { grid-template-columns: 1fr; }
+            .stat-card { min-height: 0; }
+        }
     </style>
 </head>
 <body>
@@ -78,30 +106,29 @@
         </header>
 
         <div class="grid-stats">
-            <div class="card">
+            <div class="card stat-card">
                 <div class="card-title">Attacks Intercepted</div>
                 <div class="card-value" id="stat-total">0</div>
                 <div class="card-sub">Total bot probe requests</div>
             </div>
-            <div class="card">
+            <div class="card stat-card">
                 <div class="card-title">Threat IPs Nullrouted</div>
-                <div class="card-value" style="color: var(--accent-red);" id="stat-blocked">0</div>
+                <div class="card-value danger" id="stat-blocked">0</div>
                 <div class="card-sub">Active on the MikroTik list, including after a restart</div>
             </div>
-            <div class="card">
+            <div class="card stat-card">
                 <div class="card-title">MikroTik Router</div>
-                <div class="card-value" style="font-size: 20px; font-family: monospace;" id="mt-model">RouterOS v7</div>
+                <div class="card-value named mono" id="mt-model">RouterOS v7</div>
                 <div class="card-sub" id="mt-details">Uptime: -- | CPU: --%</div>
             </div>
-            <div class="card">
+            <div class="card stat-card">
                 <div class="card-title">Target List Name</div>
-                <div class="card-value" style="font-size: 20px; color: var(--accent-amber);" id="stat-list">MSuite-Blacklist</div>
+                <div class="card-value named amber" id="stat-list">MSuite-Blacklist</div>
                 <div class="card-sub" id="stat-timeout">Timeout: 7d drop in prerouting</div>
             </div>
         </div>
 
-        <div class="dashboard-layout">
-            <!-- Left: Live Attack Feed -->
+        <div class="stack">
             <div class="card">
                 <div class="feed-header">
                     <h2>Live Intercepted Attacks</h2>
@@ -115,76 +142,74 @@
                                 <th>Attacker IP</th>
                                 <th>Owner</th>
                                 <th>Method</th>
+                                <th>Host</th>
                                 <th>Path / Target</th>
                                 <th>Action</th>
                                 <th>User-Agent</th>
                             </tr>
                         </thead>
                         <tbody id="attack-rows">
-                            <tr><td colspan="7" style="text-align:center; color: var(--text-secondary); padding: 30px;">Listening for incoming probes from Nginx...</td></tr>
+                            <tr><td colspan="8" style="text-align:center; color: var(--text-secondary); padding: 30px;">Listening for incoming probes from Nginx...</td></tr>
                         </tbody>
                     </table>
                 </div>
             </div>
 
-            <!-- Right: Diagnostics & Top Targets -->
-            <div style="display: flex; flex-direction: column; gap: 20px;">
-                <!-- Manual Block -->
-                <div class="card">
+            <div class="side-grid">
+                <div class="card panel">
                     <div class="card-title">Manual MikroTik Block</div>
-                    <p style="font-size: 12px; color: var(--text-secondary);">Directly nullroute an IP into MikroTik firewall</p>
+                    <p class="panel-note">Directly nullroute an IP into MikroTik firewall</p>
                     <div class="manual-block-box">
                         <input type="text" id="manual-ip-input" placeholder="e.g. 198.51.100.25">
                         <button class="btn btn-danger" onclick="manualBlock()">Block IP</button>
                     </div>
                 </div>
 
-                <!-- Top Probed Paths -->
-                <div class="card">
+                <div class="card panel">
                     <div class="card-title">Top Targeted Paths</div>
-                    <div id="top-paths-list">
-                        <div style="color: var(--text-secondary); font-size: 12px;">No attacks logged yet.</div>
+                    <div class="panel-body" id="top-paths-list">
+                        <div class="muted" style="font-size: 12px;">No attacks logged yet.</div>
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card panel">
                     <div class="card-title">Nullrouted on MikroTik</div>
-                    <p style="font-size: 12px; color: var(--text-secondary);">Read from the router. An update does not remove these.</p>
-                    <div id="router-blocks" style="margin-top: 8px;">
-                        <div style="color: var(--text-secondary); font-size: 12px;">Reading the address list...</div>
+                    <p class="panel-note">Read from the router. An update does not remove these.</p>
+                    <div class="panel-body" id="router-blocks">
+                        <div class="muted" style="font-size: 12px;">Reading the address list...</div>
                     </div>
                 </div>
 
-                <!-- Top Attackers -->
-                <div class="card">
+                <div class="card panel">
                     <div class="card-title">Top Scanning IPs</div>
-                    <div id="top-ips-list">
-                        <div style="color: var(--text-secondary); font-size: 12px;">No IPs recorded yet.</div>
+                    <div class="panel-body" id="top-ips-list">
+                        <div class="muted" style="font-size: 12px;">No IPs recorded yet.</div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <div class="card" style="margin-top: 20px;">
-            <div class="feed-header">
-                <h2>Attacking ranges</h2>
-                <span class="badge-live">WHOIS PREFIX</span>
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Range</th>
-                            <th>Org</th>
-                            <th>Hits</th>
-                            <th>IPs</th>
-                            <th>Latest path</th>
-                        </tr>
-                    </thead>
-                    <tbody id="range-rows">
-                        <tr><td colspan="5" style="text-align:center; color: var(--text-secondary); padding: 20px;">No network ranges yet.</td></tr>
-                    </tbody>
-                </table>
+            <div class="card">
+                <div class="feed-header">
+                    <h2>Attacking ranges</h2>
+                    <span class="badge-live">WHOIS PREFIX</span>
+                </div>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Range</th>
+                                <th>Org</th>
+                                <th class="col-num">Hits</th>
+                                <th class="col-num">IPs</th>
+                                <th>Host</th>
+                                <th>Latest path</th>
+                            </tr>
+                        </thead>
+                        <tbody id="range-rows">
+                            <tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 20px;">No network ranges yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
@@ -251,14 +276,16 @@
                 : '<span class="tag tag-whitelisted">WHITELISTED</span>';
             const methodClass = ev.method === 'POST' ? 'method-post' : 'method-get';
 
+            const agent = ev.user_agent || 'Unknown';
             tr.innerHTML = `
-                <td style="color: var(--text-secondary);">${timeStr}</td>
-                <td><strong>${escapeHtml(ev.client_ip)}</strong></td>
+                <td class="muted nowrap">${timeStr}</td>
+                <td class="mono"><strong>${escapeHtml(ev.client_ip)}</strong></td>
                 <td>${ownerCell(ev)}</td>
-                <td><span class="${methodClass}">${escapeHtml(ev.method)}</span></td>
-                <td><span style="font-family: monospace; color: var(--accent-blue);">${escapeHtml(ev.path)}</span></td>
-                <td>${actionTag}</td>
-                <td style="color: var(--text-secondary); font-size: 11px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(ev.user_agent || 'Unknown')}</td>
+                <td class="nowrap"><span class="${methodClass}">${escapeHtml(ev.method)}</span></td>
+                <td class="mono host">${hostCell(ev.host)}</td>
+                <td class="mono path">${escapeHtml(ev.path)}</td>
+                <td class="nowrap">${actionTag}</td>
+                <td class="ua" title="${escapeHtml(agent)}">${escapeHtml(agent)}</td>
             `;
 
             tbody.insertBefore(tr, tbody.firstChild);
@@ -271,7 +298,7 @@
             const el = document.getElementById('router-blocks');
             if (!el) return;
             if (!blocks || blocks.length === 0) {
-                el.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px;">No addresses on the MikroTik list.</div>';
+                el.innerHTML = '<div class="muted" style="font-size: 12px;">No addresses on the MikroTik list.</div>';
                 return;
             }
             el.innerHTML = blocks.map(block => {
@@ -281,11 +308,16 @@
             }).join('');
         }
 
+        function hostCell(host) {
+            if (!host) return '<span class="muted">—</span>';
+            return escapeHtml(host);
+        }
+
         function ownerCell(ev) {
             const name = ev.owner || '';
             const ptr = ev.ptr || '';
             if (!name && !ptr) {
-                return '<span style="color: var(--text-secondary);">—</span>';
+                return '<span class="muted">—</span>';
             }
             let html = '';
             if (name) {
@@ -304,17 +336,18 @@
                 .then(rows => {
                     const body = document.getElementById('range-rows');
                     if (!rows || rows.length === 0) {
-                        body.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-secondary); padding: 20px;">No network ranges yet.</td></tr>';
+                        body.innerHTML = '<tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 20px;">No network ranges yet.</td></tr>';
                         return;
                     }
                     body.innerHTML = rows.map(row => {
-                        const asn = row.asn ? '<div style="color: var(--text-secondary); font-size: 11px;">' + escapeHtml(row.asn) + '</div>' : '';
+                        const asn = row.asn ? '<div class="muted" style="font-size: 11px;">' + escapeHtml(row.asn) + '</div>' : '';
                         return '<tr>' +
-                            '<td style="font-family: monospace;">' + escapeHtml(row.cidr) + '</td>' +
+                            '<td class="mono">' + escapeHtml(row.cidr) + '</td>' +
                             '<td>' + escapeHtml(row.org || '') + asn + '</td>' +
-                            '<td>' + (row.hits || 0) + '</td>' +
-                            '<td>' + (row.ip_count || 0) + '</td>' +
-                            '<td style="font-family: monospace; color: var(--accent-blue);">' + escapeHtml(row.latest_path || '') + '</td>' +
+                            '<td class="col-num">' + (row.hits || 0) + '</td>' +
+                            '<td class="col-num">' + (row.ip_count || 0) + '</td>' +
+                            '<td class="mono host">' + hostCell(row.latest_host) + '</td>' +
+                            '<td class="mono path">' + escapeHtml(row.latest_path || '') + '</td>' +
                             '</tr>';
                     }).join('');
                 }).catch(e => console.error(e));

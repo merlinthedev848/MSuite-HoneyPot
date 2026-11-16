@@ -36,6 +36,7 @@ func TestRangesGroupByWHOISPrefix(t *testing.T) {
 	st.AddEvent(AttackEvent{
 		Timestamp: base,
 		ClientIP:  "203.0.113.10",
+		Host:      "old.example",
 		Path:      "/.env",
 		Org:       "Example Net",
 		Owner:     "Example Net",
@@ -46,6 +47,7 @@ func TestRangesGroupByWHOISPrefix(t *testing.T) {
 	st.AddEvent(AttackEvent{
 		Timestamp: base.Add(time.Minute),
 		ClientIP:  "203.0.113.11",
+		Host:      "wp.example",
 		Path:      "/wp-login.php",
 		Org:       "Example Net",
 		CIDR:      "203.0.113.0/24",
@@ -69,7 +71,10 @@ func TestRangesGroupByWHOISPrefix(t *testing.T) {
 	if got.Hits != 2 || got.IPCount != 2 {
 		t.Fatalf("hits=%d ips=%d", got.Hits, got.IPCount)
 	}
-	if got.LatestPath != "/wp-login.php" {
-		t.Fatalf("latest path = %q", got.LatestPath)
+	if got.LatestHost != "wp.example" || got.LatestPath != "/wp-login.php" {
+		t.Fatalf("latest host = %q path = %q", got.LatestHost, got.LatestPath)
+	}
+	if len(st.GetRecentEvents(10)) != 3 {
+		t.Fatal("a hit with no host and no prefix must stay in the log")
 	}
 }

@@ -36,7 +36,7 @@
                         │   • Deceptive Decoys         │
                         │   • Live Web Dashboard (SSE) │
                         └──────────────┬───────────────┘
-                                       │ RouterOS API :8728 (address-list)
+                                       │ HTTP REST :8728/rest (address-list)
                                        ▼
                        [ MikroTik Address-List ]
                        (e.g., MSuite-Blacklist, 7d)
@@ -69,7 +69,9 @@ curl -sSL https://raw.githubusercontent.com/merlinthedev848/MSuite-HoneyPot/main
 
 ## 🛡️ Step 1: MikroTik Firewall Rule (Run Once)
 
-The honeypot talks to RouterOS through the **binary `api` service on port 8728** (plaintext on the LAN). It does not use `www` or `www-ssl`, and it does not need ports 80 or 443 on the router. Leave those disabled so Proxmox nginx owns them and the router login page stays unexposed.
+The honeypot talks to RouterOS over the **HTTP REST API at `http://<router>:8728/rest`**. Port 8728 is plaintext HTTP, not HTTPS. `www` and `www-ssl` stay disabled on ports 80 and 443 so Proxmox nginx owns them and the router login page stays unexposed. The binary API cannot share port 8728, so the honeypot does not use it.
+
+`mikrotik_use_ssl` defaults to `false`. If the port is 8728, the client uses `http` even when an older `config.json` still has `mikrotik_use_ssl` set to `true`.
 
 Open your MikroTik RouterOS terminal (or WinBox / SSH) and paste this **single line**:
 
@@ -79,13 +81,7 @@ Open your MikroTik RouterOS terminal (or WinBox / SSH) and paste this **single l
 
 > **Why RAW prerouting?** The `raw` table drops packets before connection tracking, which costs essentially **0% CPU** on your MikroTik even during heavy port/HTTP scanning floods.
 
-The `api` service is often disabled. The installer enables it and installs the raw drop rule over SSH (port 22, same username and password) when that login works. If you are configuring the router by hand, enable the API with:
-
-```routeros
-/ip service set api disabled=no port=8728
-```
-
-`api-ssl` (port 8729) is optional. Set `mikrotik_use_ssl` to `true` and `mikrotik_port` to `8729` only if you want TLS. The default is plaintext `api` on 8728.
+The installer installs that raw drop rule over SSH (port 22, same username and password) when the login works. It does not enable `www`, `www-ssl`, or the binary `api` service.
 
 ---
 

@@ -11,43 +11,44 @@ import (
 )
 
 type Config struct {
-	ListenPort     int           `json:"listen_port"`
-	DashboardPort  int           `json:"dashboard_port"`
-	WebRootDecoy   string        `json:"web_root_decoy"`
-	TarpitDelay    time.Duration `json:"tarpit_delay"`
-	
-	// MikroTik settings
-	MikroTikEnabled    bool          `json:"mikrotik_enabled"`
-	MikroTikHost       string        `json:"mikrotik_host"`
-	MikroTikPort       int           `json:"mikrotik_port"`
-	MikroTikUseSSL     bool          `json:"mikrotik_use_ssl"`
-	MikroTikSkipTLS    bool          `json:"mikrotik_skip_tls"`
-	MikroTikUser       string        `json:"mikrotik_user"`
-	MikroTikPassword   string        `json:"mikrotik_password"`
-	MikroTikList       string        `json:"mikrotik_list"`
-	MikroTikTimeout    string        `json:"mikrotik_timeout"`
-	MikroTikAction     string        `json:"mikrotik_action"` // "drop" via address-list
-	
+	ListenPort    int           `json:"listen_port"`
+	DashboardPort int           `json:"dashboard_port"`
+	WebRootDecoy  string        `json:"web_root_decoy"`
+	TarpitDelay   time.Duration `json:"tarpit_delay"`
+
+	// MikroTik settings. The honeypot uses the binary API service (port 8728),
+	// not www or www-ssl. api-ssl (port 8729) is opt-in via MikroTikUseSSL.
+	MikroTikEnabled  bool   `json:"mikrotik_enabled"`
+	MikroTikHost     string `json:"mikrotik_host"`
+	MikroTikPort     int    `json:"mikrotik_port"`
+	MikroTikUseSSL   bool   `json:"mikrotik_use_ssl"`
+	MikroTikSkipTLS  bool   `json:"mikrotik_skip_tls"`
+	MikroTikUser     string `json:"mikrotik_user"`
+	MikroTikPassword string `json:"mikrotik_password"`
+	MikroTikList     string `json:"mikrotik_list"`
+	MikroTikTimeout  string `json:"mikrotik_timeout"`
+	MikroTikAction   string `json:"mikrotik_action"` // "drop" via address-list
+
 	// Reverse Proxy trust
-	TrustedProxies     []string      `json:"trusted_proxies"`
-	WhitelistSubnets   []string      `json:"whitelist_subnets"`
-	
+	TrustedProxies   []string `json:"trusted_proxies"`
+	WhitelistSubnets []string `json:"whitelist_subnets"`
+
 	// parsed CIDRs
-	ParsedWhitelist    []*net.IPNet  `json:"-"`
-	ParsedProxies      []*net.IPNet  `json:"-"`
+	ParsedWhitelist []*net.IPNet `json:"-"`
+	ParsedProxies   []*net.IPNet `json:"-"`
 }
 
-func LoadConfig() (*Config, error) {
-	cfg := &Config{
+func defaultConfig() *Config {
+	return &Config{
 		ListenPort:       8080,
 		DashboardPort:    8081,
 		WebRootDecoy:     "fake-nginx",
 		TarpitDelay:      0 * time.Millisecond,
 		MikroTikEnabled:  true,
 		MikroTikHost:     "192.168.88.1",
-		MikroTikPort:     443,
-		MikroTikUseSSL:   true,
-		MikroTikSkipTLS:  true, // many homelabs use self-signed certificates
+		MikroTikPort:     8728,
+		MikroTikUseSSL:   false,
+		MikroTikSkipTLS:  false,
 		MikroTikUser:     "admin",
 		MikroTikPassword: "",
 		MikroTikList:     "MSuite-Blacklist",
@@ -71,18 +72,28 @@ func LoadConfig() (*Config, error) {
 			"fe80::/10",
 		},
 	}
+}
+
+func applyMikroTikPortDefault(cfg *Config) {
+	if cfg.MikroTikPort <= 0 {
+		cfg.MikroTikPort = 8728
+	}
+}
+
+func LoadConfig() (*Config, error) {
+	cfg := defaultConfig()
 
 	configFile := flag.String("config", "", "Path to JSON config file (optional)")
 	listenPort := flag.Int("port", 0, "Honeypot listen port (default 8080)")
 	dashPort := flag.Int("dash-port", 0, "Dashboard listen port (default 8081)")
 	mtHost := flag.String("mt-host", "", "MikroTik host / IP")
-	mtPort := flag.Int("mt-port", 0, "MikroTik REST API port (default 443)")
+	mtPort := flag.Int("mt-port", 0, "MikroTik API port (default 8728; use 8729 with --mt-ssl)")
 	mtUser := flag.String("mt-user", "", "MikroTik API user")
 	mtPass := flag.String("mt-pass", "", "MikroTik API password")
 	mtList := flag.String("mt-list", "", "MikroTik address-list name (default MSuite-Blacklist)")
 	mtTimeout := flag.String("mt-timeout", "", "MikroTik ban timeout e.g. 7d, 24h, 30d (default 7d)")
-	mtSSL := flag.Bool("mt-ssl", true, "Use HTTPS for MikroTik REST API")
-	mtNoSSL := flag.Bool("mt-no-ssl", false, "Disable HTTPS (use plain HTTP) for MikroTik")
+	mtSSL := flag.Bool("mt-ssl", false, "Use RouterOS api-ssl (TLS). Not the default; set --mt-port 8729")
+	mtNoSSL := flag.Bool("mt-no-ssl", false, "Use plaintext RouterOS api (default, port 8728)")
 	flag.Parse()
 
 	// 1. Load from file if specified or if default config.json exists
@@ -176,6 +187,7 @@ func LoadConfig() (*Config, error) {
 	} else if *mtSSL {
 		cfg.MikroTikUseSSL = true
 	}
+	applyMikroTikPortDefault(cfg)
 
 	// Parse subnets
 	for _, cidr := range cfg.WhitelistSubnets {

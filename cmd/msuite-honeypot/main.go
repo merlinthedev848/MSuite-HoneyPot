@@ -40,8 +40,12 @@ func main() {
 
 	log.Printf("[Config] Honeypot Listen Port: :%d", cfg.ListenPort)
 	log.Printf("[Config] Dashboard Listen Port: :%d", cfg.DashboardPort)
-	log.Printf("[Config] MikroTik Host: %s (SSL: %t, List: %s, Timeout: %s)",
-		cfg.MikroTikHost, cfg.MikroTikUseSSL, cfg.MikroTikList, cfg.MikroTikTimeout)
+	apiMode := "api"
+	if cfg.MikroTikUseSSL {
+		apiMode = "api-ssl"
+	}
+	log.Printf("[Config] MikroTik %s %s:%d (List: %s, Timeout: %s)",
+		apiMode, cfg.MikroTikHost, cfg.MikroTikPort, cfg.MikroTikList, cfg.MikroTikTimeout)
 	log.Printf("[Config] Whitelisted Subnets: %d CIDRs loaded", len(cfg.ParsedWhitelist))
 
 	// 1. Initialize store & mikrotik client

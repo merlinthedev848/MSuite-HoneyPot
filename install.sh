@@ -25,9 +25,11 @@ cat << "EOF"
 EOF
 echo -e "${NC}"
 
-# Default parameters
+# Default parameters. RouterOS binary API (service "api"), not www/www-ssl.
 MIKROTIK_HOST="${MIKROTIK_HOST:-}"
-MIKROTIK_PORT="${MIKROTIK_PORT:-443}"
+MIKROTIK_PORT="${MIKROTIK_PORT:-8728}"
+MIKROTIK_PORT_EXPLICIT=0
+MIKROTIK_USE_SSL="${MIKROTIK_USE_SSL:-false}"
 MIKROTIK_USER="${MIKROTIK_USER:-admin}"
 MIKROTIK_PASS="${MIKROTIK_PASS:-}"
 MIKROTIK_LIST="${MIKROTIK_LIST:-MSuite-Blacklist}"
@@ -35,12 +37,14 @@ MIKROTIK_TIMEOUT="${MIKROTIK_TIMEOUT:-7d}"
 HONEYPOT_PORT="${HONEYPOT_PORT:-8080}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8081}"
 REPO_BASE="https://raw.githubusercontent.com/merlinthedev848/MSuite-HoneyPot/main"
+ROUTEROS_CONFIGURED=0
 
 # Parse CLI flags
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --mikrotik|--mt-host) MIKROTIK_HOST="$2"; shift ;;
-        --port|--mt-port) MIKROTIK_PORT="$2"; shift ;;
+        --port|--mt-port) MIKROTIK_PORT="$2"; MIKROTIK_PORT_EXPLICIT=1; shift ;;
+        --api-ssl) MIKROTIK_USE_SSL=true ;;
         --user|--mt-user) MIKROTIK_USER="$2"; shift ;;
         --pass|--mt-pass) MIKROTIK_PASS="$2"; shift ;;
         --list|--mt-list) MIKROTIK_LIST="$2"; shift ;;
@@ -51,7 +55,8 @@ while [[ "$#" -gt 0 ]]; do
             echo "Usage: curl -sSL ... | bash -s -- [OPTIONS]"
             echo "Options:"
             echo "  --mikrotik <IP>    MikroTik router IP"
-            echo "  --port <PORT>      MikroTik REST API port (default: 443)"
+            echo "  --port <PORT>      MikroTik API port (default: 8728, plaintext api service)"
+            echo "  --api-ssl          Use api-ssl (TLS, port 8729) instead of plaintext api"
             echo "  --user <USER>      MikroTik API user (default: admin)"
             echo "  --pass <PASS>      MikroTik API password"
             echo "  --list <NAME>      Firewall address-list name (default: MSuite-Blacklist)"
@@ -71,12 +76,17 @@ case $ARCH in
     *) echo -e "${RED}[!] Unsupported architecture: $ARCH${NC}"; exit 1 ;;
 esac
 
+# api-ssl is explicit. Plaintext api on 8728 stays the default.
+if [ "$MIKROTIK_USE_SSL" = "true" ] && [ "$MIKROTIK_PORT_EXPLICIT" != "1" ]; then
+    MIKROTIK_PORT=8729
+fi
+
 # Interactive prompt if values missing and terminal is interactive
 if [ -t 0 ] && [ -z "$MIKROTIK_HOST" ]; then
     echo -e "${CYAN}--- MikroTik RouterOS Configuration ---${NC}"
     read -rp "Enter MikroTik IP address [e.g. 192.168.88.1]: " MIKROTIK_HOST
-    read -rp "Enter MikroTik REST API port [443]: " input_port
-    MIKROTIK_PORT="${input_port:-443}"
+    read -rp "Enter MikroTik API port [${MIKROTIK_PORT}]: " input_port
+    MIKROTIK_PORT="${input_port:-$MIKROTIK_PORT}"
     read -rp "Enter MikroTik Admin Username [admin]: " input_user
     MIKROTIK_USER="${input_user:-admin}"
     read -s -rp "Enter MikroTik Admin Password: " MIKROTIK_PASS
@@ -91,6 +101,164 @@ fi
 if [ -z "$MIKROTIK_HOST" ]; then
     MIKROTIK_HOST="192.168.88.1"
 fi
+
+json_escape() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\n'/\\n}
+    s=${s//$'\r'/\\r}
+    s=${s//$'\t'/\\t}
+    printf '%s' "$s"
+}
+
+ros_dquote() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    printf '"%s"' "$s"
+}
+
+write_honeypot_config() {
+    local host user pass list timeout
+    host=$(json_escape "$MIKROTIK_HOST")
+    user=$(json_escape "$MIKROTIK_USER")
+    pass=$(json_escape "$MIKROTIK_PASS")
+    list=$(json_escape "$MIKROTIK_LIST")
+    timeout=$(json_escape "$MIKROTIK_TIMEOUT")
+    cat << EOF
+{
+  "listen_port": ${HONEYPOT_PORT},
+  "dashboard_port": ${DASHBOARD_PORT},
+  "mikrotik_enabled": true,
+  "mikrotik_host": "${host}",
+  "mikrotik_port": ${MIKROTIK_PORT},
+  "mikrotik_use_ssl": ${MIKROTIK_USE_SSL},
+  "mikrotik_skip_tls": false,
+  "mikrotik_user": "${user}",
+  "mikrotik_password": "${pass}",
+  "mikrotik_list": "${list}",
+  "mikrotik_timeout": "${timeout}"
+}
+EOF
+}
+
+routeros_service_name() {
+    if [ "$MIKROTIK_USE_SSL" = "true" ]; then
+        printf 'api-ssl'
+    else
+        printf 'api'
+    fi
+}
+
+print_api_enable_line() {
+    echo -e "${YELLOW}    On the router, run this one command:${NC}"
+    echo -e "${CYAN}/ip service set $(routeros_service_name) disabled=no port=${MIKROTIK_PORT}${NC}"
+}
+
+# Enable the API service and install the raw drop rule over SSH (port 22).
+# A failure here must not abort the honeypot install.
+routeros_ssh() {
+    local remote_cmd=$1
+    local known askpass status out
+    known=$(mktemp)
+    askpass=$(mktemp)
+    cat > "$askpass" << 'EOF'
+#!/bin/sh
+printf '%s\n' "$MIKROTIK_PASS"
+EOF
+    chmod 700 "$askpass"
+
+    local -a cmd
+    if command -v sshpass >/dev/null 2>&1 && [ -n "$MIKROTIK_PASS" ]; then
+        export SSHPASS="$MIKROTIK_PASS"
+        cmd=(sshpass -e ssh)
+    else
+        export MIKROTIK_PASS
+        export SSH_ASKPASS="$askpass"
+        export SSH_ASKPASS_REQUIRE=force
+        export DISPLAY="${DISPLAY:-:0}"
+        if setsid -w true >/dev/null 2>&1; then
+            cmd=(setsid -w ssh)
+        else
+            cmd=(ssh)
+        fi
+    fi
+    if command -v timeout >/dev/null 2>&1; then
+        cmd=(timeout 20 "${cmd[@]}")
+    fi
+
+    local -a opts=(
+        -p 22
+        -o "UserKnownHostsFile=${known}"
+        -o NumberOfPasswordPrompts=1
+        -o ConnectTimeout=8
+        -o LogLevel=ERROR
+    )
+    if [ -n "$MIKROTIK_PASS" ]; then
+        opts+=(-o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no)
+    fi
+
+    run_once() {
+        "${cmd[@]}" "${opts[@]}" -o "StrictHostKeyChecking=$1" "${MIKROTIK_USER}@${MIKROTIK_HOST}" "$remote_cmd" </dev/null
+    }
+
+    set +e
+    out=$(run_once accept-new 2>&1)
+    status=$?
+    if printf '%s\n' "$out" | grep -qi 'Bad configuration option'; then
+        out=$(run_once no 2>&1)
+        status=$?
+    fi
+    set -e
+    printf '%s\n' "$out"
+    rm -f "$known" "$askpass"
+    unset SSHPASS
+    return "$status"
+}
+
+configure_mikrotik_router() {
+    ROUTEROS_CONFIGURED=0
+    local svc port list_q comment_q remote output status
+    svc=$(routeros_service_name)
+    port="$MIKROTIK_PORT"
+    list_q=$(ros_dquote "$MIKROTIK_LIST")
+    comment_q=$(ros_dquote "MSuite Honeypot: Nullroute Bots & Scanners")
+    remote="/ip service set ${svc} disabled=no port=${port}; :if ([:len [/ip firewall raw find where chain=prerouting src-address-list=${list_q} action=drop]] = 0) do={ /ip firewall raw add chain=prerouting src-address-list=${list_q} action=drop comment=${comment_q} }"
+
+    echo -e "${BLUE}[*] Configuring RouterOS over SSH (${MIKROTIK_HOST}:22): enable ${svc} port ${port} and the raw drop rule...${NC}"
+    if ! command -v ssh >/dev/null 2>&1; then
+        echo -e "${YELLOW}[!] ssh client is not installed. The honeypot install will continue.${NC}"
+        print_api_enable_line
+        return 0
+    fi
+
+    status=0
+    output=$(routeros_ssh "$remote" 2>&1) || status=$?
+    if [ "$status" -eq 0 ] && ! printf '%s' "$output" | grep -Eqi 'failure:|syntax error|expected end of command|bad command name|no such item'; then
+        ROUTEROS_CONFIGURED=1
+        echo -e "${GREEN}[✔] RouterOS ${svc} port ${port} is enabled and the raw prerouting drop rule is installed.${NC}"
+        return 0
+    fi
+
+    echo -e "${YELLOW}[!] Could not configure MikroTik over SSH (${MIKROTIK_HOST}:22). The honeypot install will continue.${NC}"
+    if [ -n "$output" ]; then
+        printf '%s\n' "$output" | head -n 5 | sed 's/^/    /'
+    fi
+    print_api_enable_line
+    return 0
+}
+
+print_routeros_followup() {
+    if [ "$ROUTEROS_CONFIGURED" = "1" ]; then
+        echo -e "RouterOS:        ${GREEN}$(routeros_service_name) port ${MIKROTIK_PORT} and raw drop rule configured over SSH${NC}"
+        return 0
+    fi
+    echo -e "${YELLOW}Raw drop rule (skip if it already exists):${NC}"
+    echo -e "${CYAN}/ip firewall raw add chain=prerouting src-address-list=${MIKROTIK_LIST} action=drop comment=\"MSuite Honeypot: Nullroute Bots & Scanners\"${NC}"
+}
+
+configure_mikrotik_router
 
 # Function to check Proxmox VE Host
 if command -v pveversion >/dev/null 2>&1 && [ -f /etc/pve/pve-root-ca.pem ]; then
@@ -142,21 +310,7 @@ if command -v pveversion >/dev/null 2>&1 && [ -f /etc/pve/pve-root-ca.pem ]; the
 
             # Write config inside container
             pct exec "$CT_ID" -- mkdir -p /etc/msuite-honeypot
-            cat << EOF | pct exec "$CT_ID" -- tee /etc/msuite-honeypot/config.json > /dev/null
-{
-  "listen_port": ${HONEYPOT_PORT},
-  "dashboard_port": ${DASHBOARD_PORT},
-  "mikrotik_enabled": true,
-  "mikrotik_host": "${MIKROTIK_HOST}",
-  "mikrotik_port": ${MIKROTIK_PORT},
-  "mikrotik_use_ssl": true,
-  "mikrotik_skip_tls": true,
-  "mikrotik_user": "${MIKROTIK_USER}",
-  "mikrotik_password": "${MIKROTIK_PASS}",
-  "mikrotik_list": "${MIKROTIK_LIST}",
-  "mikrotik_timeout": "${MIKROTIK_TIMEOUT}"
-}
-EOF
+            write_honeypot_config | pct exec "$CT_ID" -- tee /etc/msuite-honeypot/config.json > /dev/null
 
             # Setup OpenRC
             pct exec "$CT_ID" -- curl -sSL "${REPO_BASE}/scripts/msuite-honeypot.initd" -o /etc/init.d/msuite-honeypot
@@ -169,6 +323,7 @@ EOF
             echo -e "Container IP:    ${CYAN}${LXC_IP:-<check router DHCP>}${NC}"
             echo -e "Web Dashboard:   ${CYAN}http://${LXC_IP:-<CT_IP>}:${DASHBOARD_PORT}${NC}"
             echo -e "Honeypot Ingress:${CYAN}http://${LXC_IP:-<CT_IP>}:${HONEYPOT_PORT}${NC}"
+            print_routeros_followup
             echo -e "${GREEN}===================================================================${NC}"
             exit 0
         fi
@@ -195,21 +350,7 @@ curl -sSL "${REPO_BASE}/dist/msuite-honeypot-${BIN_ARCH}" -o /usr/local/bin/msui
 chmod +x /usr/local/bin/msuite-honeypot
 
 # Create configuration
-cat << EOF > /etc/msuite-honeypot/config.json
-{
-  "listen_port": ${HONEYPOT_PORT},
-  "dashboard_port": ${DASHBOARD_PORT},
-  "mikrotik_enabled": true,
-  "mikrotik_host": "${MIKROTIK_HOST}",
-  "mikrotik_port": ${MIKROTIK_PORT},
-  "mikrotik_use_ssl": true,
-  "mikrotik_skip_tls": true,
-  "mikrotik_user": "${MIKROTIK_USER}",
-  "mikrotik_password": "${MIKROTIK_PASS}",
-  "mikrotik_list": "${MIKROTIK_LIST}",
-  "mikrotik_timeout": "${MIKROTIK_TIMEOUT}"
-}
-EOF
+write_honeypot_config > /etc/msuite-honeypot/config.json
 chmod 600 /etc/msuite-honeypot/config.json
 
 # Init Service setup
@@ -234,11 +375,9 @@ echo -e "${GREEN}[✔] MSuite-HoneyPot Installed and Running Successfully!${NC}"
 echo -e "-------------------------------------------------------------------"
 echo -e "Web Dashboard:    ${CYAN}http://${LOCAL_IP}:${DASHBOARD_PORT}${NC}"
 echo -e "Honeypot Ingress: ${CYAN}http://${LOCAL_IP}:${HONEYPOT_PORT}${NC}"
-echo -e "Target MikroTik:  ${YELLOW}${MIKROTIK_HOST} (List: ${MIKROTIK_LIST})${NC}"
+echo -e "Target MikroTik:  ${YELLOW}${MIKROTIK_HOST}:${MIKROTIK_PORT} (List: ${MIKROTIK_LIST})${NC}"
+print_routeros_followup
 echo -e "-------------------------------------------------------------------"
-echo -e "${YELLOW}Step 1: On your MikroTik RouterOS terminal, run this ONE command:${NC}"
-echo -e "${CYAN}/ip firewall raw add chain=prerouting src-address-list=${MIKROTIK_LIST} action=drop comment=\"MSuite Honeypot Nullroute\"${NC}"
-echo -e ""
-echo -e "${YELLOW}Step 2: In your Nginx config (/etc/nginx/conf.d/00-honeypot-default.conf):${NC}"
+echo -e "${YELLOW}In your Nginx config (/etc/nginx/conf.d/00-honeypot-default.conf):${NC}"
 echo -e "Set your default server block proxy_pass to: ${CYAN}http://${LOCAL_IP}:${HONEYPOT_PORT};${NC}"
 echo -e "${GREEN}===================================================================${NC}\n"

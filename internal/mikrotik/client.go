@@ -1,23 +1,35 @@
 package mikrotik
 
 import (
-	"bytes"
+	"context"
+	"crypto/md5"
 	"crypto/tls"
-	"encoding/json"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 )
 
+const (
+	// DefaultPort is the RouterOS binary API service ("api"). It is plaintext
+	// on the LAN. www (80) and www-ssl (443) are not used.
+	DefaultPort = 8728
+	// SSLPort is the RouterOS "api-ssl" service. It is only used when TLS is
+	// requested and no port was configured.
+	SSLPort = 8729
+)
+
 type Client struct {
 	cfg        *config.Config
-	httpClient *http.Client
-	baseURL    string
+	addr       string
+	useTLS     bool
+	tlsConfig  *tls.Config
+	dial       func(ctx context.Context) (net.Conn, error)
 	cacheLock  sync.RWMutex
 	blockedIPs map[string]time.Time
 }
@@ -33,209 +45,301 @@ type AddressListEntry struct {
 }
 
 type SystemResource struct {
-	Version  string `json:"version"`
-	Uptime   string `json:"uptime"`
-	Platform string `json:"platform"`
-	Board    string `json:"board-name"`
-	CPU      string `json:"cpu"`
-	CPULoad  string `json:"cpu-load"`
+	Version   string `json:"version"`
+	Uptime    string `json:"uptime"`
+	Platform  string `json:"platform"`
+	Board     string `json:"board"`
+	BoardName string `json:"board-name,omitempty"`
+	CPU       string `json:"cpu"`
+	CPULoad   string `json:"cpu-load"`
 }
 
 func NewClient(cfg *config.Config) *Client {
-	scheme := "https"
-	if !cfg.MikroTikUseSSL {
-		scheme = "http"
+	port := cfg.MikroTikPort
+	if port <= 0 {
+		if cfg.MikroTikUseSSL {
+			port = SSLPort
+		} else {
+			port = DefaultPort
+		}
 	}
-	baseURL := fmt.Sprintf("%s://%s:%d/rest", scheme, cfg.MikroTikHost, cfg.MikroTikPort)
-
-	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: cfg.MikroTikSkipTLS,
-		},
-		ResponseHeaderTimeout: 5 * time.Second,
-	}
-
-	httpClient := &http.Client{
-		Transport: tr,
-		Timeout:   6 * time.Second,
-	}
-
-	return &Client{
+	c := &Client{
 		cfg:        cfg,
-		httpClient: httpClient,
-		baseURL:    baseURL,
+		addr:       net.JoinHostPort(cfg.MikroTikHost, fmt.Sprintf("%d", port)),
+		useTLS:     cfg.MikroTikUseSSL,
 		blockedIPs: make(map[string]time.Time),
 	}
+	if c.useTLS {
+		tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+		if cfg.MikroTikHost != "" && net.ParseIP(cfg.MikroTikHost) == nil {
+			tlsCfg.ServerName = cfg.MikroTikHost
+		}
+		// Skip verification only when the operator explicitly opts in for
+		// api-ssl. The default plaintext API does not use TLS at all.
+		if cfg.MikroTikSkipTLS {
+			tlsCfg.InsecureSkipVerify = true
+		}
+		c.tlsConfig = tlsCfg
+	}
+	c.dial = c.defaultDial
+	return c
 }
 
-// BlockIP adds an IP to the MikroTik firewall address-list with timeout and comment
+// URL is the RouterOS API dial target (host:port). The default is port 8728.
+func (c *Client) URL() string {
+	return c.addr
+}
+
+func (c *Client) defaultDial(ctx context.Context) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 5 * time.Second}
+	if !c.useTLS {
+		return d.DialContext(ctx, "tcp", c.addr)
+	}
+	conn, err := d.DialContext(ctx, "tcp", c.addr)
+	if err != nil {
+		return nil, err
+	}
+	tlsConn := tls.Client(conn, c.tlsConfig)
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return tlsConn, nil
+}
+
+func (c *Client) withSession(fn func(r *stream) error) error {
+	if c.cfg.MikroTikHost == "" {
+		return fmt.Errorf("mikrotik host is not configured")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to connect to mikrotik at %s: %w", c.addr, err)
+	}
+	defer conn.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	s := newStream(conn)
+	if err := login(s, c.cfg.MikroTikUser, c.cfg.MikroTikPassword); err != nil {
+		return fmt.Errorf("mikrotik api login at %s failed: %w", c.addr, err)
+	}
+	return fn(s)
+}
+
+func login(s *stream, user, pass string) error {
+	rep, err := run(s.r, s.w, "/login", "=name="+user, "=password="+pass)
+	if err != nil {
+		return err
+	}
+	if rep.trap != "" {
+		return fmt.Errorf("%s", rep.trap)
+	}
+	challenge := ""
+	if rep.done != nil {
+		challenge = rep.done["ret"]
+	}
+	if challenge == "" {
+		return nil
+	}
+	raw, err := hex.DecodeString(challenge)
+	if err != nil {
+		return fmt.Errorf("login challenge: %w", err)
+	}
+	// RouterOS before 6.43: MD5(0x00 + password + challenge), prefixed with "00".
+	sum := md5.Sum(append(append([]byte{0}, []byte(pass)...), raw...))
+	response := "00" + hex.EncodeToString(sum[:])
+	rep, err = run(s.r, s.w, "/login", "=name="+user, "=response="+response)
+	if err != nil {
+		return err
+	}
+	if rep.trap != "" {
+		return fmt.Errorf("%s", rep.trap)
+	}
+	return nil
+}
+
+func trapError(rep *reply) error {
+	if rep == nil || rep.trap == "" {
+		return nil
+	}
+	return fmt.Errorf("mikrotik api error: %s", rep.trap)
+}
+
+func alreadyPresent(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "already have") || strings.Contains(msg, "already exist")
+}
+
+// BlockIP adds an IP to the MikroTik firewall address-list with timeout and comment.
 func (c *Client) BlockIP(ip, reason string) error {
 	if !c.cfg.MikroTikEnabled || c.cfg.MikroTikHost == "" {
 		return nil
 	}
 
-	// Check local deduplication cache (within 1 hour)
 	c.cacheLock.RLock()
 	lastSeen, exists := c.blockedIPs[ip]
 	c.cacheLock.RUnlock()
-
-	if exists && time.Since(lastSeen) < 1*time.Hour {
-		return nil // already blocked recently, suppress redundant API calls
+	if exists && time.Since(lastSeen) < time.Hour {
+		return nil
 	}
 
-	entry := AddressListEntry{
-		List:    c.cfg.MikroTikList,
-		Address: ip,
-		Timeout: c.cfg.MikroTikTimeout,
-		Comment: fmt.Sprintf("MSuite Honeypot: %s (%s)", reason, time.Now().Format("2006-01-02 15:04:05")),
-	}
-
-	body, err := json.Marshal(entry)
+	comment := fmt.Sprintf("MSuite Honeypot: %s (%s)", reason, time.Now().Format("2006-01-02 15:04:05"))
+	err := c.withSession(func(s *stream) error {
+		rep, err := run(s.r, s.w,
+			"/ip/firewall/address-list/add",
+			"=list="+c.cfg.MikroTikList,
+			"=address="+ip,
+			"=timeout="+c.cfg.MikroTikTimeout,
+			"=comment="+comment,
+		)
+		if err != nil {
+			return err
+		}
+		if err := trapError(rep); err != nil {
+			if alreadyPresent(err) {
+				return nil
+			}
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest("POST", c.baseURL+"/ip/firewall/address-list", bytes.NewBuffer(body))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.SetBasicAuth(c.cfg.MikroTikUser, c.cfg.MikroTikPassword)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("mikrotik api request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	// Status 200 or 201 is success
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
-		c.cacheLock.Lock()
-		c.blockedIPs[ip] = time.Now()
-		c.cacheLock.Unlock()
-		log.Printf("[MikroTik] Successfully added %s to address-list '%s' (timeout: %s)", ip, c.cfg.MikroTikList, c.cfg.MikroTikTimeout)
-		return nil
-	}
-
-	// If already in list, MikroTik returns 400 Bad Request with "already have such entry"
-	if resp.StatusCode == http.StatusBadRequest && bytes.Contains(respBody, []byte("already have")) {
-		c.cacheLock.Lock()
-		c.blockedIPs[ip] = time.Now()
-		c.cacheLock.Unlock()
-		return nil
-	}
-
-	return fmt.Errorf("mikrotik api error (HTTP %d): %s", resp.StatusCode, string(respBody))
+	c.cacheLock.Lock()
+	c.blockedIPs[ip] = time.Now()
+	c.cacheLock.Unlock()
+	log.Printf("[MikroTik] Successfully added %s to address-list '%s' (timeout: %s)", ip, c.cfg.MikroTikList, c.cfg.MikroTikTimeout)
+	return nil
 }
 
-// UnblockIP removes an IP from the MikroTik address-list
+// UnblockIP removes an IP from the MikroTik address-list.
 func (c *Client) UnblockIP(ip string) error {
 	if !c.cfg.MikroTikEnabled || c.cfg.MikroTikHost == "" {
 		return nil
 	}
 
-	// 1. Query for the ID of the entry
-	url := fmt.Sprintf("%s/ip/firewall/address-list?list=%s&address=%s", c.baseURL, c.cfg.MikroTikList, ip)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return err
-	}
-	req.SetBasicAuth(c.cfg.MikroTikUser, c.cfg.MikroTikPassword)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	var entries []AddressListEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if entry.ID != "" {
-			delReq, err := http.NewRequest("DELETE", c.baseURL+"/ip/firewall/address-list/"+entry.ID, nil)
-			if err != nil {
+	err := c.withSession(func(s *stream) error {
+		rep, err := run(s.r, s.w,
+			"/ip/firewall/address-list/print",
+			"?list="+c.cfg.MikroTikList,
+			"?address="+ip,
+		)
+		if err != nil {
+			return err
+		}
+		if err := trapError(rep); err != nil {
+			return err
+		}
+		for _, rec := range rep.records {
+			id := rec[".id"]
+			if id == "" {
 				continue
 			}
-			delReq.SetBasicAuth(c.cfg.MikroTikUser, c.cfg.MikroTikPassword)
-			delResp, err := c.httpClient.Do(delReq)
-			if err == nil {
-				delResp.Body.Close()
+			del, err := run(s.r, s.w, "/ip/firewall/address-list/remove", "=.id="+id)
+			if err != nil {
+				return err
+			}
+			if err := trapError(del); err != nil {
+				return err
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	c.cacheLock.Lock()
 	delete(c.blockedIPs, ip)
 	c.cacheLock.Unlock()
-
 	return nil
 }
 
-// ListBlocked fetches the current address-list entries from MikroTik
+// ListBlocked fetches the current address-list entries from MikroTik.
 func (c *Client) ListBlocked() ([]AddressListEntry, error) {
 	if !c.cfg.MikroTikEnabled || c.cfg.MikroTikHost == "" {
 		return nil, nil
 	}
 
-	url := fmt.Sprintf("%s/ip/firewall/address-list?list=%s", c.baseURL, c.cfg.MikroTikList)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.SetBasicAuth(c.cfg.MikroTikUser, c.cfg.MikroTikPassword)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("mikrotik error (HTTP %d): %s", resp.StatusCode, string(body))
-	}
-
 	var entries []AddressListEntry
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+	err := c.withSession(func(s *stream) error {
+		rep, err := run(s.r, s.w,
+			"/ip/firewall/address-list/print",
+			"?list="+c.cfg.MikroTikList,
+		)
+		if err != nil {
+			return err
+		}
+		if err := trapError(rep); err != nil {
+			return err
+		}
+		for _, rec := range rep.records {
+			entries = append(entries, AddressListEntry{
+				ID:       rec[".id"],
+				List:     rec["list"],
+				Address:  rec["address"],
+				Timeout:  rec["timeout"],
+				Comment:  rec["comment"],
+				Dynamic:  rec["dynamic"],
+				Disabled: rec["disabled"],
+			})
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
 	return entries, nil
 }
 
-// TestConnection checks if MikroTik REST API is reachable and credentials are valid
+// TestConnection reads /system/resource/print over the binary API.
 func (c *Client) TestConnection() (*SystemResource, error) {
 	if !c.cfg.MikroTikEnabled {
 		return nil, fmt.Errorf("mikrotik integration is disabled")
 	}
 
-	req, err := http.NewRequest("GET", c.baseURL+"/system/resource", nil)
+	var res *SystemResource
+	err := c.withSession(func(s *stream) error {
+		rep, err := run(s.r, s.w, "/system/resource/print")
+		if err != nil {
+			return err
+		}
+		if err := trapError(rep); err != nil {
+			return err
+		}
+		if len(rep.records) == 0 {
+			return fmt.Errorf("mikrotik api returned no system resource")
+		}
+		res = resourceFrom(rep.records[0])
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(c.cfg.MikroTikUser, c.cfg.MikroTikPassword)
+	return res, nil
+}
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to mikrotik at %s: %w", c.baseURL, err)
+func resourceFrom(rec map[string]string) *SystemResource {
+	board := rec["board-name"]
+	if board == "" {
+		board = rec["board"]
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("mikrotik returned HTTP %d: %s", resp.StatusCode, string(body))
+	return &SystemResource{
+		Version:   rec["version"],
+		Uptime:    rec["uptime"],
+		Platform:  rec["platform"],
+		Board:     board,
+		BoardName: board,
+		CPU:       rec["cpu"],
+		CPULoad:   rec["cpu-load"],
 	}
-
-	var res SystemResource
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, err
-	}
-
-	return &res, nil
 }

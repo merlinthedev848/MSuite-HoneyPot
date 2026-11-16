@@ -36,7 +36,7 @@
                         │   • Deceptive Decoys         │
                         │   • Live Web Dashboard (SSE) │
                         └──────────────┬───────────────┘
-                                       │ REST API (POST address-list)
+                                       │ RouterOS API :8728 (address-list)
                                        ▼
                        [ MikroTik Address-List ]
                        (e.g., MSuite-Blacklist, 7d)
@@ -69,7 +69,9 @@ curl -sSL https://raw.githubusercontent.com/merlinthedev848/MSuite-HoneyPot/main
 
 ## 🛡️ Step 1: MikroTik Firewall Rule (Run Once)
 
-Open your MikroTik RouterOS terminal (or WebFig / WinBox) and paste this **single line**:
+The honeypot talks to RouterOS through the **binary `api` service on port 8728** (plaintext on the LAN). It does not use `www` or `www-ssl`, and it does not need ports 80 or 443 on the router. Leave those disabled so Proxmox nginx owns them and the router login page stays unexposed.
+
+Open your MikroTik RouterOS terminal (or WinBox / SSH) and paste this **single line**:
 
 ```routeros
 /ip firewall raw add chain=prerouting src-address-list=MSuite-Blacklist action=drop comment="MSuite Honeypot: Nullroute Bots & Scanners"
@@ -77,10 +79,13 @@ Open your MikroTik RouterOS terminal (or WebFig / WinBox) and paste this **singl
 
 > **Why RAW prerouting?** The `raw` table drops packets before connection tracking, which costs essentially **0% CPU** on your MikroTik even during heavy port/HTTP scanning floods.
 
-Make sure the REST API service is active (enabled by default in RouterOS v7+):
+The `api` service is often disabled. The installer enables it and installs the raw drop rule over SSH (port 22, same username and password) when that login works. If you are configuring the router by hand, enable the API with:
+
 ```routeros
-/ip service set www-ssl disabled=no port=443
+/ip service set api disabled=no port=8728
 ```
+
+`api-ssl` (port 8729) is optional. Set `mikrotik_use_ssl` to `true` and `mikrotik_port` to `8729` only if you want TLS. The default is plaintext `api` on 8728.
 
 ---
 
@@ -159,9 +164,9 @@ Located at `/etc/msuite-honeypot/config.json`:
   "dashboard_port": 8081,
   "mikrotik_enabled": true,
   "mikrotik_host": "192.168.88.1",
-  "mikrotik_port": 443,
-  "mikrotik_use_ssl": true,
-  "mikrotik_skip_tls": true,
+  "mikrotik_port": 8728,
+  "mikrotik_use_ssl": false,
+  "mikrotik_skip_tls": false,
   "mikrotik_user": "admin",
   "mikrotik_password": "YourPassword",
   "mikrotik_list": "MSuite-Blacklist",
@@ -189,6 +194,8 @@ docker run -d \
   -p 8080:8080 \
   -p 8081:8081 \
   -e MIKROTIK_HOST="192.168.88.1" \
+  -e MIKROTIK_PORT="8728" \
+  -e MIKROTIK_USE_SSL="false" \
   -e MIKROTIK_USER="admin" \
   -e MIKROTIK_PASS="YourPassword" \
   -e MIKROTIK_LIST="MSuite-Blacklist" \

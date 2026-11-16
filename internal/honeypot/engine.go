@@ -78,6 +78,35 @@ func (e *Engine) ExtractClientIP(r *http.Request) string {
 	return r.RemoteAddr
 }
 
+// RequestedHost is the HTTP Host header: the name the scanner requested.
+// A missing or blank header falls back to the IP address this connection
+// arrived on. The caller still records the hit when both are empty.
+func RequestedHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if host := strings.TrimSpace(r.Host); host != "" {
+		return host
+	}
+	addr, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	return connectionIP(addr)
+}
+
+func connectionIP(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		host = addr.String()
+	}
+	host = strings.Trim(host, "[]")
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String()
+	}
+	return host
+}
+
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	clientIP := e.ExtractClientIP(r)
 	parsedIP := net.ParseIP(clientIP)
@@ -99,7 +128,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 	method := r.Method
-	host := r.Host
+	host := RequestedHost(r)
 	ua := r.UserAgent()
 
 	isWhitelisted := e.cfg.IsWhitelisted(parsedIP)

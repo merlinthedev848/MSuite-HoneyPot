@@ -144,8 +144,8 @@ http://<HONEYPOT_IP>:8081
 ```
 
 - **Live Stream:** Real-time attack telemetry via Server-Sent Events (SSE).
-- **Attack Telemetry:** Timestamp, Attacker IP, owner or organisation, PTR name when reverse DNS has one, Method, Probed Path, User-Agent, and Nullroute status.
-- **Attacking ranges:** WHOIS prefix or route, organisation, hit count, distinct addresses, and the latest path. Nothing is emailed to abuse contacts.
+- **Attack Telemetry:** Timestamp, Attacker IP, owner or organisation, PTR name when reverse DNS has one, Method, Host header (or the IP they connected to when the header is empty), Probed Path, User-Agent, and Nullroute status. A missing host does not drop the hit.
+- **Attacking ranges:** WHOIS prefix or route, organisation, hit count, distinct addresses, and the latest host next to the latest path. Nothing is emailed to abuse contacts.
 - **Top Targets:** Overview of most heavily targeted files and top scanning IPs.
 - **Manual Control:** Instantly block or unblock any IP in your MikroTik router with one click.
 - **RouterOS Health:** Displays live router board model, CPU load, and connection status.

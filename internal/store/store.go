@@ -37,6 +37,7 @@ type NetworkRange struct {
 	Country    string    `json:"country,omitempty"`
 	Hits       int64     `json:"hits"`
 	IPCount    int       `json:"ip_count"`
+	LatestHost string    `json:"latest_host"`
 	LatestPath string    `json:"latest_path"`
 	Latest     time.Time `json:"latest"`
 }
@@ -78,6 +79,7 @@ type rangeAccum struct {
 	country    string
 	hits       int64
 	ips        map[string]struct{}
+	latestHost string
 	latestPath string
 	latest     time.Time
 }
@@ -171,6 +173,7 @@ func (s *Store) noteRange(event AttackEvent) {
 	}
 	if acc.latest.IsZero() || !event.Timestamp.Before(acc.latest) {
 		acc.latest = event.Timestamp
+		acc.latestHost = event.Host
 		acc.latestPath = event.Path
 	}
 }
@@ -189,6 +192,7 @@ func (s *Store) GetRanges() []NetworkRange {
 			Country:    acc.country,
 			Hits:       acc.hits,
 			IPCount:    len(acc.ips),
+			LatestHost: acc.latestHost,
 			LatestPath: acc.latestPath,
 			Latest:     acc.latest,
 		})

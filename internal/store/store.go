@@ -18,6 +18,27 @@ type AttackEvent struct {
 	Payload   string            `json:"payload,omitempty"`
 	Blocked   bool              `json:"blocked"`
 	Reason    string            `json:"reason"`
+
+	// Attribution. Empty when the lookup failed.
+	Owner   string `json:"owner,omitempty"`
+	PTR     string `json:"ptr,omitempty"`
+	Org     string `json:"org,omitempty"`
+	NetName string `json:"netname,omitempty"`
+	Country string `json:"country,omitempty"`
+	CIDR    string `json:"cidr,omitempty"`
+	ASN     string `json:"asn,omitempty"`
+}
+
+// NetworkRange groups attackers that share one WHOIS prefix.
+type NetworkRange struct {
+	CIDR       string    `json:"cidr"`
+	Org        string    `json:"org"`
+	ASN        string    `json:"asn,omitempty"`
+	Country    string    `json:"country,omitempty"`
+	Hits       int64     `json:"hits"`
+	IPCount    int       `json:"ip_count"`
+	LatestPath string    `json:"latest_path"`
+	Latest     time.Time `json:"latest"`
 }
 
 type Stats struct {
@@ -30,15 +51,26 @@ type Stats struct {
 }
 
 type Store struct {
-	lock          sync.RWMutex
-	maxEvents     int
-	events        []AttackEvent
-	nextID        int64
-	uniqueIPs     map[string]int64
-	pathStats     map[string]int64
-	uaStats       map[string]int64
-	subscribers   map[chan AttackEvent]struct{}
-	subsLock      sync.Mutex
+	lock        sync.RWMutex
+	maxEvents   int
+	events      []AttackEvent
+	nextID      int64
+	uniqueIPs   map[string]int64
+	pathStats   map[string]int64
+	uaStats     map[string]int64
+	subscribers map[chan AttackEvent]struct{}
+	subsLock    sync.Mutex
+	ranges      map[string]*rangeAccum
+}
+
+type rangeAccum struct {
+	org        string
+	asn        string
+	country    string
+	hits       int64
+	ips        map[string]struct{}
+	latestPath string
+	latest     time.Time
 }
 
 func NewStore(maxEvents int) *Store {
@@ -52,6 +84,7 @@ func NewStore(maxEvents int) *Store {
 		pathStats:   make(map[string]int64),
 		uaStats:     make(map[string]int64),
 		subscribers: make(map[chan AttackEvent]struct{}),
+		ranges:      make(map[string]*rangeAccum),
 	}
 }
 
@@ -75,6 +108,7 @@ func (s *Store) AddEvent(event AttackEvent) AttackEvent {
 		s.events = s.events[1:]
 	}
 	s.events = append(s.events, event)
+	s.noteRange(event)
 	s.lock.Unlock()
 
 	// Broadcast to SSE subscribers
@@ -88,6 +122,68 @@ func (s *Store) AddEvent(event AttackEvent) AttackEvent {
 	s.subsLock.Unlock()
 
 	return event
+}
+
+func (s *Store) noteRange(event AttackEvent) {
+	if event.CIDR == "" {
+		return
+	}
+	acc := s.ranges[event.CIDR]
+	if acc == nil {
+		acc = &rangeAccum{ips: make(map[string]struct{})}
+		s.ranges[event.CIDR] = acc
+	}
+	acc.hits++
+	if event.ClientIP != "" {
+		acc.ips[event.ClientIP] = struct{}{}
+	}
+	if acc.org == "" {
+		if event.Org != "" {
+			acc.org = event.Org
+		} else {
+			acc.org = event.Owner
+		}
+	}
+	if acc.asn == "" {
+		acc.asn = event.ASN
+	}
+	if acc.country == "" {
+		acc.country = event.Country
+	}
+	if acc.latest.IsZero() || !event.Timestamp.Before(acc.latest) {
+		acc.latest = event.Timestamp
+		acc.latestPath = event.Path
+	}
+}
+
+// GetRanges returns WHOIS prefixes ordered by hit count.
+func (s *Store) GetRanges() []NetworkRange {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	out := make([]NetworkRange, 0, len(s.ranges))
+	for cidr, acc := range s.ranges {
+		out = append(out, NetworkRange{
+			CIDR:       cidr,
+			Org:        acc.org,
+			ASN:        acc.asn,
+			Country:    acc.country,
+			Hits:       acc.hits,
+			IPCount:    len(acc.ips),
+			LatestPath: acc.latestPath,
+			Latest:     acc.latest,
+		})
+	}
+	for i := 0; i < len(out); i++ {
+		best := i
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Hits > out[best].Hits || (out[j].Hits == out[best].Hits && out[j].CIDR < out[best].CIDR) {
+				best = j
+			}
+		}
+		out[i], out[best] = out[best], out[i]
+	}
+	return out
 }
 
 func (s *Store) GetRecentEvents(limit int) []AttackEvent {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/merlinthedev848/msuite-honeypot/internal/attrib"
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 	"github.com/merlinthedev848/msuite-honeypot/internal/mikrotik"
 	"github.com/merlinthedev848/msuite-honeypot/internal/store"
@@ -18,13 +19,18 @@ type Engine struct {
 	cfg      *config.Config
 	mtClient *mikrotik.Client
 	store    *store.Store
+	attrib   *attrib.Cache
 }
 
-func NewEngine(cfg *config.Config, mt *mikrotik.Client, st *store.Store) *Engine {
+func NewEngine(cfg *config.Config, mt *mikrotik.Client, st *store.Store, names *attrib.Cache) *Engine {
+	if names == nil {
+		names = attrib.NewCache()
+	}
 	return &Engine{
 		cfg:      cfg,
 		mtClient: mt,
 		store:    st,
+		attrib:   names,
 	}
 }
 
@@ -114,6 +120,20 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[Whitelisted] %s requested %s %s - ignored for ban", clientIP, method, path)
 	}
 
+	// Attribution is best-effort and runs after the nullroute attempt.
+	// A DNS or WHOIS failure leaves the owner blank and still records the hit.
+	var owner, ptrName, org, netName, country, cidr, asn string
+	if parsedIP != nil && e.attrib != nil {
+		info := e.attrib.Lookup(clientIP)
+		owner = info.Owner()
+		ptrName = info.PTR
+		org = info.Org
+		netName = info.NetName
+		country = info.Country
+		cidr = info.CIDR
+		asn = info.ASN
+	}
+
 	// Save attack event to store
 	e.store.AddEvent(store.AttackEvent{
 		Timestamp: time.Now(),
@@ -127,6 +147,13 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Payload:   payload,
 		Blocked:   blocked,
 		Reason:    reason,
+		Owner:     owner,
+		PTR:       ptrName,
+		Org:       org,
+		NetName:   netName,
+		Country:   country,
+		CIDR:      cidr,
+		ASN:       asn,
 	})
 
 	// Tarpit delay if configured

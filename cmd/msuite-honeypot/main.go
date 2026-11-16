@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/merlinthedev848/msuite-honeypot/internal/attrib"
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 	"github.com/merlinthedev848/msuite-honeypot/internal/honeypot"
 	"github.com/merlinthedev848/msuite-honeypot/internal/mikrotik"
@@ -60,7 +61,7 @@ func main() {
 	}()
 
 	// 2. Setup Honeypot HTTP Server (port 8080)
-	engine := honeypot.NewEngine(cfg, mt, st)
+	engine := honeypot.NewEngine(cfg, mt, st, attrib.NewCache())
 	hpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.ListenPort),
 		Handler:      engine,

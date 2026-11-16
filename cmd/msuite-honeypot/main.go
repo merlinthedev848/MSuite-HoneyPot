@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 	"github.com/merlinthedev848/msuite-honeypot/internal/honeypot"
 	"github.com/merlinthedev848/msuite-honeypot/internal/mikrotik"
+	"github.com/merlinthedev848/msuite-honeypot/internal/nginxlog"
 	"github.com/merlinthedev848/msuite-honeypot/internal/store"
 	"github.com/merlinthedev848/msuite-honeypot/internal/web"
 )
@@ -45,9 +47,21 @@ func main() {
 		mikrotik.RESTBaseURL(cfg.MikroTikHost, cfg.MikroTikPort, cfg.MikroTikUseSSL), cfg.MikroTikList, cfg.MikroTikTimeout)
 	log.Printf("[Config] Whitelisted Subnets: %d CIDRs loaded", len(cfg.ParsedWhitelist))
 
-	// 1. Initialize store & mikrotik client
+	// 1. Initialize store & mikrotik client. The attack feed is reloaded from disk.
 	st := store.NewStore(2000)
+	if err := st.Load(cfg.StatePath); err != nil {
+		log.Printf("[State] Could not reload the attack feed: %v", err)
+	} else {
+		log.Printf("[State] Reloaded %d attack events from %s", len(st.GetRecentEvents(0)), cfg.StatePath)
+	}
 	mt := mikrotik.NewClient(cfg)
+
+	if cfg.ImportOnce {
+		if err := runImport(cfg, mt, st); err != nil {
+			log.Fatalf("[Import] %v", err)
+		}
+		return
+	}
 
 	// Quick check of MikroTik, and reload addresses that are already on the list.
 	go func() {
@@ -127,4 +141,31 @@ func main() {
 	_ = hpServer.Shutdown(ctx)
 	_ = dashServer.Shutdown(ctx)
 	log.Println("[System] Servers stopped cleanly.")
+}
+
+// runImport reads one nginx access log and exits. It does not follow the file.
+// "-" reads stdin so a log pasted from another machine can be imported.
+func runImport(cfg *config.Config, mt *mikrotik.Client, st *store.Store) error {
+	path := cfg.NginxLogFlag
+	if path == "" {
+		path = cfg.NginxAccessLog
+	}
+	var reader io.Reader
+	if path == "-" {
+		reader = os.Stdin
+		log.Printf("[Import] Reading a pasted nginx access log from stdin")
+	} else {
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		reader = f
+		log.Printf("[Import] Reading %s once", path)
+	}
+	sum := nginxlog.Summarize(reader, cfg.OwnAddresses, cfg.ParsedWhitelist)
+	result := nginxlog.Apply(sum, mt, st)
+	log.Printf("[Import] imported %d, failed %d, skipped local %d, own %d, whitelist %d, normal %d, unparsed %d",
+		result.Imported, result.Failed, result.SkippedLocal, result.SkippedOwn, result.SkippedWhitelist, result.SkippedNormal, result.Unparsed)
+	return nil
 }

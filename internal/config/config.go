@@ -34,9 +34,28 @@ type Config struct {
 	TrustedProxies   []string `json:"trusted_proxies"`
 	WhitelistSubnets []string `json:"whitelist_subnets"`
 
+	// nginx access log import. The default path is for a log copied onto this
+	// box. The dashboard import accepts a paste or upload because the log
+	// often lives on a different machine.
+	NginxAccessLog string   `json:"nginx_access_log"`
+	OwnAddresses   []string `json:"own_addresses"`
+
+	// Attack feed and AbuseIPDB "already reported" set. Empty key keeps reports off.
+	StatePath       string `json:"state_path"`
+	AbuseIPDBAPIKey string `json:"abuseipdb_api_key"`
+
+	// Range nullroute. One address never blocks its prefix. The prefix is
+	// added only after RangeBlockMinIPs distinct addresses inside RangeBlockWindow.
+	RangeBlockMinIPs int    `json:"range_block_min_ips"`
+	RangeBlockWindow string `json:"range_block_window"`
+
 	// parsed CIDRs
 	ParsedWhitelist []*net.IPNet `json:"-"`
 	ParsedProxies   []*net.IPNet `json:"-"`
+
+	// One-time import flags. Not stored in config.json.
+	ImportOnce   bool   `json:"-"`
+	NginxLogFlag string `json:"-"`
 }
 
 func defaultConfig() *Config {
@@ -72,6 +91,12 @@ func defaultConfig() *Config {
 			"fc00::/7",
 			"fe80::/10",
 		},
+		NginxAccessLog:   "/var/log/nginx/access.log",
+		OwnAddresses:     []string{"10.0.0.194", "127.0.0.1", "::1"},
+		StatePath:        "/var/lib/msuite-honeypot/state.json",
+		AbuseIPDBAPIKey:  "",
+		RangeBlockMinIPs: 3,
+		RangeBlockWindow: "15m",
 	}
 }
 
@@ -100,6 +125,8 @@ func LoadConfig() (*Config, error) {
 	mtTimeout := flag.String("mt-timeout", "", "MikroTik ban timeout e.g. 7d, 24h, 30d (default 7d)")
 	mtSSL := flag.Bool("mt-ssl", false, "Use HTTPS for MikroTik REST on a port other than www 8480")
 	mtNoSSL := flag.Bool("mt-no-ssl", false, "Use plain HTTP for MikroTik REST (default, www port 8480)")
+	importLog := flag.Bool("import-log", false, "Import an nginx access log once and exit. Does not follow the file.")
+	nginxLog := flag.String("nginx-log", "", "nginx access log to import. Overrides nginx_access_log. Use - to read stdin.")
 	flag.Parse()
 
 	// 1. Load from file if specified or if default config.json exists
@@ -194,6 +221,9 @@ func LoadConfig() (*Config, error) {
 		cfg.MikroTikUseSSL = true
 	}
 	applyMikroTikPortDefault(cfg)
+	applyFeatureDefaults(cfg)
+	cfg.ImportOnce = *importLog
+	cfg.NginxLogFlag = *nginxLog
 
 	// Parse subnets
 	for _, cidr := range cfg.WhitelistSubnets {
@@ -221,6 +251,44 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func applyFeatureDefaults(cfg *Config) {
+	if cfg.NginxAccessLog == "" {
+		cfg.NginxAccessLog = "/var/log/nginx/access.log"
+	}
+	if len(cfg.OwnAddresses) == 0 {
+		cfg.OwnAddresses = []string{"10.0.0.194", "127.0.0.1", "::1"}
+	}
+	if cfg.StatePath == "" {
+		cfg.StatePath = "/var/lib/msuite-honeypot/state.json"
+	}
+	if cfg.RangeBlockMinIPs < 2 {
+		cfg.RangeBlockMinIPs = 3
+	}
+	if strings.TrimSpace(cfg.RangeBlockWindow) == "" {
+		cfg.RangeBlockWindow = "15m"
+	}
+}
+
+// RangeWindow is how long distinct addresses are remembered for a prefix block.
+func (c *Config) RangeWindow() time.Duration {
+	if c == nil {
+		return 15 * time.Minute
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(c.RangeBlockWindow))
+	if err != nil || d <= 0 {
+		return 15 * time.Minute
+	}
+	return d
+}
+
+// RangeMinIPs is the distinct-address floor. One address never qualifies.
+func (c *Config) RangeMinIPs() int {
+	if c == nil || c.RangeBlockMinIPs < 2 {
+		return 3
+	}
+	return c.RangeBlockMinIPs
 }
 
 func (c *Config) IsWhitelisted(ip net.IP) bool {

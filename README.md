@@ -146,6 +146,10 @@ http://<HONEYPOT_IP>:8081
 - **Live Stream:** Real-time attack telemetry via Server-Sent Events (SSE).
 - **Attack Telemetry:** Timestamp, Attacker IP, owner or organisation, PTR name when reverse DNS has one, Method, Host header (or the IP they connected to when the header is empty), Probed Path, User-Agent, and Nullroute status. A missing host does not drop the hit.
 - **Attacking ranges:** WHOIS prefix or route, organisation, hit count, distinct addresses, and the latest host next to the latest path. Nothing is emailed to abuse contacts.
+- **Attack feed:** Saved on disk and shown again after a restart or update. The MikroTik address list is still read from the router.
+- **Nginx import:** One pass over a pasted or uploaded access log. It does not follow the file. `10.0.0.0/24`, this honeypot's own addresses, and ordinary requests to a real site are skipped.
+- **AbuseIPDB:** Off until `abuseipdb_api_key` is set. One HTTPS report per address, category 21 (Web App Attack). A failed report does not undo the nullroute.
+- **Prefix nullroute:** A single address still blocks only that address. The WHOIS prefix is added only after 3 distinct addresses from it inside 15 minutes. `10.0.0.0/24` is never blocked.
 - **Top Targets:** Overview of most heavily targeted files and top scanning IPs.
 - **Manual Control:** Instantly block or unblock any IP in your MikroTik router with one click.
 - **RouterOS Health:** Displays live router board model, CPU load, and connection status.
@@ -169,6 +173,12 @@ Located at `/etc/msuite-honeypot/config.json`:
   "mikrotik_password": "YourPassword",
   "mikrotik_list": "MSuite-Blacklist",
   "mikrotik_timeout": "7d",
+  "nginx_access_log": "/var/log/nginx/access.log",
+  "own_addresses": ["10.0.0.194", "127.0.0.1", "::1"],
+  "state_path": "/var/lib/msuite-honeypot/state.json",
+  "abuseipdb_api_key": "",
+  "range_block_min_ips": 3,
+  "range_block_window": "15m",
   "whitelist_subnets": [
     "127.0.0.0/8",
     "::1/128",
@@ -180,6 +190,14 @@ Located at `/etc/msuite-honeypot/config.json`:
 ```
 
 > **Safety Whitelist:** RFC1918 private subnets are whitelisted by default, ensuring your internal LAN and Proxmox node IPs can never be accidentally blacklisted.
+
+Import a log that lives on another machine, once:
+
+```bash
+msuite-honeypot -config /etc/msuite-honeypot/config.json -import-log -nginx-log /path/to/access.log
+```
+
+`-nginx-log -` reads stdin. The default path is `nginx_access_log` (`/var/log/nginx/access.log`) and can be changed in `config.json`. The dashboard has the same one-time import for a paste or an upload. Leave `abuseipdb_api_key` empty to keep AbuseIPDB off. The dashboard shows MikroTik offline when www on `mikrotik_port` stops answering.
 
 ---
 

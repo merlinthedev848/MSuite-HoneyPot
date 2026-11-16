@@ -26,11 +26,12 @@ const (
 )
 
 type Client struct {
-	cfg        *config.Config
-	httpClient *http.Client
-	baseURL    string
-	cacheLock  sync.RWMutex
-	blockedIPs map[string]time.Time
+	cfg         *config.Config
+	httpClient  *http.Client
+	probeClient *http.Client
+	baseURL     string
+	cacheLock   sync.RWMutex
+	blockedIPs  map[string]time.Time
 }
 
 type AddressListEntry struct {
@@ -67,11 +68,22 @@ func NewClient(cfg *config.Config) *Client {
 		tr.TLSClientConfig = tlsCfg
 	}
 
+	probeTr := &http.Transport{
+		ResponseHeaderTimeout: 3 * time.Second,
+		DisableKeepAlives:     true,
+	}
+	if tr.TLSClientConfig != nil {
+		probeTr.TLSClientConfig = tr.TLSClientConfig.Clone()
+	}
 	return &Client{
 		cfg: cfg,
 		httpClient: &http.Client{
 			Transport: tr,
 			Timeout:   6 * time.Second,
+		},
+		probeClient: &http.Client{
+			Transport: probeTr,
+			Timeout:   3 * time.Second,
 		},
 		baseURL:    baseURL,
 		blockedIPs: make(map[string]time.Time),
@@ -252,7 +264,9 @@ func (c *Client) ListBlocked() ([]AddressListEntry, error) {
 	return entries, nil
 }
 
-// TestConnection reads the RouterOS REST system resource.
+// TestConnection reads the RouterOS REST system resource on the configured
+// www port. A fresh connection is used so a stopped www listener cannot stay
+// "connected" on a cached socket. Any failure means the dashboard is offline.
 func (c *Client) TestConnection() (*SystemResource, error) {
 	if !c.cfg.MikroTikEnabled {
 		return nil, fmt.Errorf("mikrotik integration is disabled")
@@ -261,9 +275,9 @@ func (c *Client) TestConnection() (*SystemResource, error) {
 		return nil, fmt.Errorf("mikrotik host is not configured")
 	}
 
-	resp, respBody, err := c.do(http.MethodGet, "/system/resource", nil)
+	resp, respBody, err := c.doWith(c.probeClient, http.MethodGet, "/system/resource", nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to mikrotik at %s: %w", c.baseURL, err)
+		return nil, fmt.Errorf("www on %s is not answering: %w", c.baseURL, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("mikrotik returned HTTP %d: %s", resp.StatusCode, string(respBody))
@@ -276,6 +290,13 @@ func (c *Client) TestConnection() (*SystemResource, error) {
 }
 
 func (c *Client) do(method, path string, body []byte) (*http.Response, []byte, error) {
+	return c.doWith(c.httpClient, method, path, body)
+}
+
+func (c *Client) doWith(client *http.Client, method, path string, body []byte) (*http.Response, []byte, error) {
+	if client == nil {
+		client = c.httpClient
+	}
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -288,7 +309,7 @@ func (c *Client) do(method, path string, body []byte) (*http.Response, []byte, e
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.SetBasicAuth(c.cfg.MikroTikUser, c.cfg.MikroTikPassword)
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, nil, err
 	}

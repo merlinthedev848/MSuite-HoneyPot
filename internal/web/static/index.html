@@ -113,6 +113,7 @@
                             <tr>
                                 <th>Time</th>
                                 <th>Attacker IP</th>
+                                <th>Owner</th>
                                 <th>Method</th>
                                 <th>Path / Target</th>
                                 <th>Action</th>
@@ -120,7 +121,7 @@
                             </tr>
                         </thead>
                         <tbody id="attack-rows">
-                            <tr><td colspan="6" style="text-align:center; color: var(--text-secondary); padding: 30px;">Listening for incoming probes from Nginx...</td></tr>
+                            <tr><td colspan="7" style="text-align:center; color: var(--text-secondary); padding: 30px;">Listening for incoming probes from Nginx...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -153,6 +154,29 @@
                         <div style="color: var(--text-secondary); font-size: 12px;">No IPs recorded yet.</div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+            <div class="feed-header">
+                <h2>Attacking ranges</h2>
+                <span class="badge-live">WHOIS PREFIX</span>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Range</th>
+                            <th>Org</th>
+                            <th>Hits</th>
+                            <th>IPs</th>
+                            <th>Latest path</th>
+                        </tr>
+                    </thead>
+                    <tbody id="range-rows">
+                        <tr><td colspan="5" style="text-align:center; color: var(--text-secondary); padding: 20px;">No network ranges yet.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -221,6 +245,7 @@
             tr.innerHTML = `
                 <td style="color: var(--text-secondary);">${timeStr}</td>
                 <td><strong>${escapeHtml(ev.client_ip)}</strong></td>
+                <td>${ownerCell(ev)}</td>
                 <td><span class="${methodClass}">${escapeHtml(ev.method)}</span></td>
                 <td><span style="font-family: monospace; color: var(--accent-blue);">${escapeHtml(ev.path)}</span></td>
                 <td>${actionTag}</td>
@@ -231,6 +256,45 @@
             if (tbody.children.length > 100) {
                 tbody.removeChild(tbody.lastChild);
             }
+        }
+
+        function ownerCell(ev) {
+            const name = ev.owner || '';
+            const ptr = ev.ptr || '';
+            if (!name && !ptr) {
+                return '<span style="color: var(--text-secondary);">—</span>';
+            }
+            let html = '';
+            if (name) {
+                const label = ev.country ? name + ' (' + ev.country + ')' : name;
+                html += '<div>' + escapeHtml(label) + '</div>';
+            }
+            if (ptr) {
+                html += '<div style="color: var(--text-secondary); font-size: 11px;">' + escapeHtml(ptr) + '</div>';
+            }
+            return html;
+        }
+
+        function loadRanges() {
+            fetch('/api/ranges')
+                .then(r => r.json())
+                .then(rows => {
+                    const body = document.getElementById('range-rows');
+                    if (!rows || rows.length === 0) {
+                        body.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-secondary); padding: 20px;">No network ranges yet.</td></tr>';
+                        return;
+                    }
+                    body.innerHTML = rows.map(row => {
+                        const asn = row.asn ? '<div style="color: var(--text-secondary); font-size: 11px;">' + escapeHtml(row.asn) + '</div>' : '';
+                        return '<tr>' +
+                            '<td style="font-family: monospace;">' + escapeHtml(row.cidr) + '</td>' +
+                            '<td>' + escapeHtml(row.org || '') + asn + '</td>' +
+                            '<td>' + (row.hits || 0) + '</td>' +
+                            '<td>' + (row.ip_count || 0) + '</td>' +
+                            '<td style="font-family: monospace; color: var(--accent-blue);">' + escapeHtml(row.latest_path || '') + '</td>' +
+                            '</tr>';
+                    }).join('');
+                }).catch(e => console.error(e));
         }
 
         function manualBlock() {
@@ -276,6 +340,7 @@
                     const ev = JSON.parse(e.data);
                     prependAttackRow(ev);
                     updateStats();
+                    loadRanges();
                 } catch(err) {}
             };
             es.onerror = function() {
@@ -285,8 +350,10 @@
 
         // Init
         updateStats();
+        loadRanges();
         checkMikroTik();
         setInterval(updateStats, 10000);
+        setInterval(loadRanges, 10000);
         setInterval(checkMikroTik, 30000);
         startSSE();
 

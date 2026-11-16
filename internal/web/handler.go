@@ -41,6 +41,7 @@ func (h *DashboardHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/", h.fileSys)
 	mux.HandleFunc("/api/stats", h.handleStats)
 	mux.HandleFunc("/api/events", h.handleEvents)
+	mux.HandleFunc("/api/ranges", h.handleRanges)
 	mux.HandleFunc("/api/stream", h.handleStream)
 	mux.HandleFunc("/api/mikrotik/status", h.handleMikroTikStatus)
 	mux.HandleFunc("/api/block", h.handleBlock)
@@ -50,6 +51,11 @@ func (h *DashboardHandler) RegisterRoutes(mux *http.ServeMux) {
 func (h *DashboardHandler) handleStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(h.store.GetStats())
+}
+
+func (h *DashboardHandler) handleRanges(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.store.GetRanges())
 }
 
 func (h *DashboardHandler) handleEvents(w http.ResponseWriter, r *http.Request) {

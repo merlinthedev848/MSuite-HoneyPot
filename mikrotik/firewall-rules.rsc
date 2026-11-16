@@ -10,6 +10,6 @@
 # /ip firewall filter add chain=input src-address-list=MSuite-Blacklist action=drop comment="MSuite Honeypot Drop (Input)" place-before=0
 # /ip firewall filter add chain=forward src-address-list=MSuite-Blacklist action=drop comment="MSuite Honeypot Drop (Forward)" place-before=0
 
-# Ensure REST API (WWW or WWW-SSL) is enabled:
-/ip service set www-ssl disabled=no port=443
-/ip service set www disabled=no port=80
+# The honeypot uses the binary API service on port 8728.
+# www and www-ssl are not required; leave them disabled so Nginx owns 80/443.
+/ip service set api disabled=no port=8728

@@ -11,10 +11,10 @@ services:
       - "8081:8081" # Web Dashboard
     environment:
       - MIKROTIK_HOST=192.168.88.1
-      - MIKROTIK_PORT=443
+      - MIKROTIK_PORT=8728
       - MIKROTIK_USER=admin
       - MIKROTIK_PASS=YourMikroTikPasswordHere
-      - MIKROTIK_USE_SSL=true
+      - MIKROTIK_USE_SSL=false
       - MIKROTIK_LIST=MSuite-Blacklist
       - MIKROTIK_TIMEOUT=7d
     volumes:

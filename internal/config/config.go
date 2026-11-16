@@ -16,9 +16,9 @@ type Config struct {
 	WebRootDecoy  string        `json:"web_root_decoy"`
 	TarpitDelay   time.Duration `json:"tarpit_delay"`
 
-	// MikroTik settings. The honeypot uses the HTTP REST API on port 8728.
-	// That port is plaintext. www (80) and www-ssl (443) stay unused.
-	// MikroTikUseSSL is ignored when the port is 8728.
+	// MikroTik settings. HTTP REST is the www service, plaintext on port 8480.
+	// Port 8728 is the binary api service and is not used. www-ssl is separate.
+	// MikroTikUseSSL is ignored when the port is 8480.
 	MikroTikEnabled  bool   `json:"mikrotik_enabled"`
 	MikroTikHost     string `json:"mikrotik_host"`
 	MikroTikPort     int    `json:"mikrotik_port"`
@@ -47,7 +47,7 @@ func defaultConfig() *Config {
 		TarpitDelay:      0 * time.Millisecond,
 		MikroTikEnabled:  true,
 		MikroTikHost:     "192.168.88.1",
-		MikroTikPort:     8728,
+		MikroTikPort:     8480,
 		MikroTikUseSSL:   false,
 		MikroTikSkipTLS:  false,
 		MikroTikUser:     "admin",
@@ -77,11 +77,11 @@ func defaultConfig() *Config {
 
 func applyMikroTikPortDefault(cfg *Config) {
 	if cfg.MikroTikPort <= 0 {
-		cfg.MikroTikPort = 8728
+		cfg.MikroTikPort = 8480
 	}
-	// An already-installed config.json can still say mikrotik_use_ssl true
-	// while the router serves plaintext HTTP on 8728. Do not use TLS there.
-	if cfg.MikroTikPort == 8728 {
+	// www on 8480 is plaintext HTTP. An older config.json can still say
+	// mikrotik_use_ssl true. Do not use TLS on this port.
+	if cfg.MikroTikPort == 8480 {
 		cfg.MikroTikUseSSL = false
 	}
 }
@@ -93,13 +93,13 @@ func LoadConfig() (*Config, error) {
 	listenPort := flag.Int("port", 0, "Honeypot listen port (default 8080)")
 	dashPort := flag.Int("dash-port", 0, "Dashboard listen port (default 8081)")
 	mtHost := flag.String("mt-host", "", "MikroTik host / IP")
-	mtPort := flag.Int("mt-port", 0, "MikroTik HTTP REST port (default 8728, plaintext)")
+	mtPort := flag.Int("mt-port", 0, "MikroTik www HTTP REST port (default 8480, plaintext; not binary api 8728)")
 	mtUser := flag.String("mt-user", "", "MikroTik API user")
 	mtPass := flag.String("mt-pass", "", "MikroTik API password")
 	mtList := flag.String("mt-list", "", "MikroTik address-list name (default MSuite-Blacklist)")
 	mtTimeout := flag.String("mt-timeout", "", "MikroTik ban timeout e.g. 7d, 24h, 30d (default 7d)")
-	mtSSL := flag.Bool("mt-ssl", false, "Use HTTPS for MikroTik REST on a port other than 8728")
-	mtNoSSL := flag.Bool("mt-no-ssl", false, "Use plain HTTP for MikroTik REST (default, port 8728)")
+	mtSSL := flag.Bool("mt-ssl", false, "Use HTTPS for MikroTik REST on a port other than www 8480")
+	mtNoSSL := flag.Bool("mt-no-ssl", false, "Use plain HTTP for MikroTik REST (default, www port 8480)")
 	flag.Parse()
 
 	// 1. Load from file if specified or if default config.json exists

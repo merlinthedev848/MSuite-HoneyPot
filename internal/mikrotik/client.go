@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	// DefaultPort is the RouterOS HTTP REST service. It is plaintext.
-	// www on 80 and www-ssl on 443 stay unused. Port 8728 is never TLS.
-	DefaultPort = 8728
+	// DefaultPort is the RouterOS www service, which serves the HTTP REST API.
+	// On this router www listens on 8480 in plaintext. Port 8728 is the binary
+	// api service and is not REST. www-ssl is a different port and is not used
+	// for 8480. Never enable TLS on the www port.
+	DefaultPort = 8480
 )
 
 type Client struct {
@@ -77,8 +79,9 @@ func NewClient(cfg *config.Config) *Client {
 }
 
 // restUsesTLS reports whether the REST call should use HTTPS.
-// Port 8728 is the plaintext HTTP REST API and stays HTTP even when an
-// older config.json still has mikrotik_use_ssl set.
+// Port 8480 is the plaintext www listener. It stays HTTP even when an
+// older config.json still has mikrotik_use_ssl set. Port 8728 is the
+// binary API, not this REST client.
 func restUsesTLS(port int, useSSL bool) bool {
 	if port <= 0 {
 		port = DefaultPort
@@ -89,7 +92,7 @@ func restUsesTLS(port int, useSSL bool) bool {
 	return useSSL
 }
 
-// RESTBaseURL is the RouterOS REST root, default http://host:8728/rest.
+// RESTBaseURL is the RouterOS REST root, default http://host:8480/rest.
 func RESTBaseURL(host string, port int, useSSL bool) string {
 	if port <= 0 {
 		port = DefaultPort
@@ -101,7 +104,7 @@ func RESTBaseURL(host string, port int, useSSL bool) string {
 	return scheme + "://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/rest"
 }
 
-// URL is the REST base the client calls. Port 8728 is always http.
+// URL is the REST base the client calls. The www port 8480 is always http.
 func (c *Client) URL() string {
 	return c.baseURL
 }

@@ -11,16 +11,16 @@ import (
 	"github.com/merlinthedev848/msuite-honeypot/internal/config"
 )
 
-func TestClientURLDefaultsToHTTP8728(t *testing.T) {
+func TestClientURLDefaultsToHTTP8480(t *testing.T) {
 	c := NewClient(&config.Config{
 		MikroTikEnabled: true,
-		MikroTikHost:    "192.168.88.1",
+		MikroTikHost:    "10.0.0.1",
 	})
-	if c.URL() != "http://192.168.88.1:8728/rest" {
-		t.Fatalf("URL = %q, want http://192.168.88.1:8728/rest", c.URL())
+	if c.URL() != "http://10.0.0.1:8480/rest" {
+		t.Fatalf("URL = %q, want http://10.0.0.1:8480/rest", c.URL())
 	}
 	if c.usesTLS() {
-		t.Fatal("port 8728 must be plain HTTP")
+		t.Fatal("www port 8480 must be plain HTTP")
 	}
 	tr, ok := c.httpClient.Transport.(*http.Transport)
 	if !ok || tr.TLSClientConfig != nil {
@@ -29,31 +29,31 @@ func TestClientURLDefaultsToHTTP8728(t *testing.T) {
 
 	legacy := NewClient(&config.Config{
 		MikroTikEnabled: true,
-		MikroTikHost:    "192.168.88.1",
-		MikroTikPort:    8728,
+		MikroTikHost:    "10.0.0.1",
+		MikroTikPort:    8480,
 		MikroTikUseSSL:  true,
 		MikroTikSkipTLS: true,
 	})
-	if legacy.URL() != "http://192.168.88.1:8728/rest" {
-		t.Fatalf("old use_ssl=true config URL = %q, want http://192.168.88.1:8728/rest", legacy.URL())
+	if legacy.URL() != "http://10.0.0.1:8480/rest" {
+		t.Fatalf("old use_ssl=true config URL = %q, want http://10.0.0.1:8480/rest", legacy.URL())
 	}
-	if strings.Contains(legacy.URL(), "https://") || strings.Contains(legacy.URL(), ":443") {
-		t.Fatalf("8728 must not use TLS or www-ssl: %s", legacy.URL())
+	if strings.Contains(legacy.URL(), "https://") || strings.Contains(legacy.URL(), ":4843") || strings.Contains(legacy.URL(), ":8728") {
+		t.Fatalf("8480 must not use TLS, www-ssl, or the binary api: %s", legacy.URL())
 	}
 	tr, ok = legacy.httpClient.Transport.(*http.Transport)
 	if !ok || tr.TLSClientConfig != nil {
-		t.Fatal("port 8728 must not use TLS even when mikrotik_use_ssl is true")
+		t.Fatal("port 8480 must not use TLS even when mikrotik_use_ssl is true")
 	}
 }
 
-func TestExplicitTLSIsNotPort8728(t *testing.T) {
+func TestWWWSSLUsesTLS(t *testing.T) {
 	c := NewClient(&config.Config{
-		MikroTikHost:   "192.168.88.1",
-		MikroTikPort:   8443,
+		MikroTikHost:   "10.0.0.1",
+		MikroTikPort:   4843,
 		MikroTikUseSSL: true,
 	})
-	if c.URL() != "https://192.168.88.1:8443/rest" || !c.usesTLS() {
-		t.Fatalf("explicit TLS URL = %s tls=%v", c.URL(), c.usesTLS())
+	if c.URL() != "https://10.0.0.1:4843/rest" || !c.usesTLS() {
+		t.Fatalf("www-ssl URL = %s tls=%v", c.URL(), c.usesTLS())
 	}
 	tr := c.httpClient.Transport.(*http.Transport)
 	if tr.TLSClientConfig == nil || tr.TLSClientConfig.InsecureSkipVerify {
@@ -113,15 +113,15 @@ func TestHTTPRESTBlockAndResource(t *testing.T) {
 
 	c := NewClient(&config.Config{
 		MikroTikEnabled:  true,
-		MikroTikHost:     "192.168.88.1",
-		MikroTikPort:     8728,
+		MikroTikHost:     "10.0.0.1",
+		MikroTikPort:     8480,
 		MikroTikUseSSL:   true,
 		MikroTikUser:     "admin",
 		MikroTikPassword: "secret",
 		MikroTikList:     "MSuite-Blacklist",
 		MikroTikTimeout:  "7d",
 	})
-	if c.URL() != "http://192.168.88.1:8728/rest" {
+	if c.URL() != "http://10.0.0.1:8480/rest" {
 		t.Fatalf("URL = %s", c.URL())
 	}
 	c.baseURL = srv.URL + "/rest"

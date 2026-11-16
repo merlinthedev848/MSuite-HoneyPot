@@ -36,7 +36,7 @@
                         │   • Deceptive Decoys         │
                         │   • Live Web Dashboard (SSE) │
                         └──────────────┬───────────────┘
-                                       │ HTTP REST :8728/rest (address-list)
+                                       │ HTTP REST :8480/rest (www)
                                        ▼
                        [ MikroTik Address-List ]
                        (e.g., MSuite-Blacklist, 7d)
@@ -58,7 +58,8 @@ curl -sSL https://raw.githubusercontent.com/merlinthedev848/MSuite-HoneyPot/main
 #### Or Non-Interactive (with flags):
 ```bash
 curl -sSL https://raw.githubusercontent.com/merlinthedev848/MSuite-HoneyPot/main/install.sh | bash -s -- \
-  --mikrotik 192.168.88.1 \
+  --mikrotik 10.0.0.1 \
+  --port 8480 \
   --user admin \
   --pass "YourRouterPassword" \
   --list "MSuite-Blacklist" \
@@ -69,9 +70,9 @@ curl -sSL https://raw.githubusercontent.com/merlinthedev848/MSuite-HoneyPot/main
 
 ## 🛡️ Step 1: MikroTik Firewall Rule (Run Once)
 
-The honeypot talks to RouterOS over the **HTTP REST API at `http://<router>:8728/rest`**. Port 8728 is plaintext HTTP, not HTTPS. `www` and `www-ssl` stay disabled on ports 80 and 443 so Proxmox nginx owns them and the router login page stays unexposed. The binary API cannot share port 8728, so the honeypot does not use it.
+The honeypot talks to RouterOS over the **HTTP REST API on the `www` service**. On this router that is `http://10.0.0.1:8480/rest`. Port 8728 is the binary `api` service, not REST, and a REST call there waits until the header timeout. `www-ssl` is port 4843 with certificate `router-cert`. Ports 80 and 443 are not the router web services; the reverse proxy listens on 443.
 
-`mikrotik_use_ssl` defaults to `false`. If the port is 8728, the client uses `http` even when an older `config.json` still has `mikrotik_use_ssl` set to `true`.
+`mikrotik_use_ssl` defaults to `false`. If the port is 8480, the client uses `http` even when an older `config.json` still has `mikrotik_use_ssl` set to `true`. Do not enable TLS for 8480.
 
 Open your MikroTik RouterOS terminal (or WinBox / SSH) and paste this **single line**:
 
@@ -81,7 +82,7 @@ Open your MikroTik RouterOS terminal (or WinBox / SSH) and paste this **single l
 
 > **Why RAW prerouting?** The `raw` table drops packets before connection tracking, which costs essentially **0% CPU** on your MikroTik even during heavy port/HTTP scanning floods.
 
-The installer installs that raw drop rule over SSH (port 22, same username and password) when the login works. It does not enable `www`, `www-ssl`, or the binary `api` service.
+The installer installs that raw drop rule over SSH (port 22, same username and password) when the login works. It does not change `www`, `www-ssl`, or the binary `api` service. REST uses the `www` listener that is already running.
 
 ---
 
@@ -159,8 +160,8 @@ Located at `/etc/msuite-honeypot/config.json`:
   "listen_port": 8080,
   "dashboard_port": 8081,
   "mikrotik_enabled": true,
-  "mikrotik_host": "192.168.88.1",
-  "mikrotik_port": 8728,
+  "mikrotik_host": "10.0.0.1",
+  "mikrotik_port": 8480,
   "mikrotik_use_ssl": false,
   "mikrotik_skip_tls": false,
   "mikrotik_user": "admin",
@@ -189,8 +190,8 @@ docker run -d \
   --restart unless-stopped \
   -p 8080:8080 \
   -p 8081:8081 \
-  -e MIKROTIK_HOST="192.168.88.1" \
-  -e MIKROTIK_PORT="8728" \
+  -e MIKROTIK_HOST="10.0.0.1" \
+  -e MIKROTIK_PORT="8480" \
   -e MIKROTIK_USE_SSL="false" \
   -e MIKROTIK_USER="admin" \
   -e MIKROTIK_PASS="YourPassword" \

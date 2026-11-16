@@ -318,23 +318,66 @@ if command -v pveversion >/dev/null 2>&1 && [ -f /etc/pve/pve-root-ca.pem ]; the
     fi
 fi
 
+# Stop a running honeypot so the new binary can replace it. Linux returns
+# ETXTBSY if curl writes straight onto the executable that is running, and
+# curl reports that as exit 23 ("client returned ERROR on write").
+stop_honeypot_if_running() {
+    if [ -x /etc/init.d/msuite-honeypot ]; then
+        rc-service msuite-honeypot stop >/dev/null 2>&1 || true
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop msuite-honeypot >/dev/null 2>&1 || true
+    fi
+}
+
+# Download to a temp file, then move it into place. Stdin is /dev/null because
+# this script is usually started with "curl | bash", and the inner curl
+# otherwise inherits that pipe.
+fetch_url() {
+    local url=$1 dest=$2
+    local tmp magic
+    tmp=$(mktemp)
+    if ! curl -fL --http1.1 -sS "$url" -o "$tmp" < /dev/null; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        return 1
+    fi
+    if command -v od >/dev/null 2>&1; then
+        magic=$(od -An -t x1 -N 4 "$tmp" | tr -d ' \n')
+        if [ "$magic" != "7f454c46" ]; then
+            echo -e "${RED}[!] Download was not a Linux executable.${NC}"
+            rm -f "$tmp"
+            return 1
+        fi
+    fi
+    mkdir -p "$(dirname "$dest")"
+    stop_honeypot_if_running
+    mv -f "$tmp" "$dest"
+}
+
 # Direct System Install (Alpine OpenRC or Debian/Ubuntu Systemd)
 echo -e "${BLUE}[*] Installing MSuite-HoneyPot on local system...${NC}"
 
 # Download binary
 mkdir -p /usr/local/bin /etc/msuite-honeypot
 echo -e "${CYAN}[*] Fetching binary (msuite-honeypot-${BIN_ARCH})...${NC}"
-curl -sSL "${REPO_BASE}/dist/msuite-honeypot-${BIN_ARCH}" -o /usr/local/bin/msuite-honeypot || {
+if ! fetch_url "${REPO_BASE}/dist/msuite-honeypot-${BIN_ARCH}" /usr/local/bin/msuite-honeypot; then
     # If downloading prebuilt fails (e.g. repo not yet pushed), check if local binary exists
     if [ -f "./dist/msuite-honeypot-${BIN_ARCH}" ]; then
+        stop_honeypot_if_running
         cp "./dist/msuite-honeypot-${BIN_ARCH}" /usr/local/bin/msuite-honeypot
     elif [ -f "./msuite-honeypot" ]; then
+        stop_honeypot_if_running
         cp "./msuite-honeypot" /usr/local/bin/msuite-honeypot
     else
         echo -e "${RED}[!] Failed to fetch binary.${NC}"
+        echo -e "${YELLOW}    Download failed before the running honeypot was replaced. The address list on the router is unchanged.${NC}"
         exit 1
     fi
-}
+fi
 chmod +x /usr/local/bin/msuite-honeypot
 
 # Create configuration
@@ -344,13 +387,13 @@ chmod 600 /etc/msuite-honeypot/config.json
 # Init Service setup
 if [ -f /etc/alpine-release ]; then
     echo -e "${CYAN}[*] Configuring OpenRC service for Alpine Linux...${NC}"
-    curl -sSL "${REPO_BASE}/scripts/msuite-honeypot.initd" -o /etc/init.d/msuite-honeypot || cp ./scripts/msuite-honeypot.initd /etc/init.d/msuite-honeypot
+    curl -fL --http1.1 -sS "${REPO_BASE}/scripts/msuite-honeypot.initd" -o /etc/init.d/msuite-honeypot < /dev/null || cp ./scripts/msuite-honeypot.initd /etc/init.d/msuite-honeypot
     chmod +x /etc/init.d/msuite-honeypot
     rc-update add msuite-honeypot default
     rc-service msuite-honeypot restart
 elif command -v systemctl >/dev/null 2>&1; then
     echo -e "${CYAN}[*] Configuring Systemd service...${NC}"
-    curl -sSL "${REPO_BASE}/scripts/msuite-honeypot.service" -o /etc/systemd/system/msuite-honeypot.service || cp ./scripts/msuite-honeypot.service /etc/systemd/system/msuite-honeypot.service
+    curl -fL --http1.1 -sS "${REPO_BASE}/scripts/msuite-honeypot.service" -o /etc/systemd/system/msuite-honeypot.service < /dev/null || cp ./scripts/msuite-honeypot.service /etc/systemd/system/msuite-honeypot.service
     systemctl daemon-reload
     systemctl enable --now msuite-honeypot
     systemctl restart msuite-honeypot

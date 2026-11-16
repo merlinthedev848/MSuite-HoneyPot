@@ -41,9 +41,17 @@ type NetworkRange struct {
 	Latest     time.Time `json:"latest"`
 }
 
+// RouterBlock is one address still present on the MikroTik list.
+type RouterBlock struct {
+	Address string `json:"address"`
+	Timeout string `json:"timeout,omitempty"`
+	Comment string `json:"comment,omitempty"`
+}
+
 type Stats struct {
 	TotalAttacks    int64            `json:"total_attacks"`
 	BlockedIPsCount int              `json:"blocked_ips_count"`
+	RouterBlocks    []RouterBlock    `json:"router_blocks"`
 	TopPaths        map[string]int64 `json:"top_paths"`
 	TopUserAgents   map[string]int64 `json:"top_user_agents"`
 	TopIPs          map[string]int64 `json:"top_ips"`
@@ -51,16 +59,17 @@ type Stats struct {
 }
 
 type Store struct {
-	lock        sync.RWMutex
-	maxEvents   int
-	events      []AttackEvent
-	nextID      int64
-	uniqueIPs   map[string]int64
-	pathStats   map[string]int64
-	uaStats     map[string]int64
-	subscribers map[chan AttackEvent]struct{}
-	subsLock    sync.Mutex
-	ranges      map[string]*rangeAccum
+	lock         sync.RWMutex
+	maxEvents    int
+	events       []AttackEvent
+	nextID       int64
+	uniqueIPs    map[string]int64
+	pathStats    map[string]int64
+	uaStats      map[string]int64
+	subscribers  map[chan AttackEvent]struct{}
+	subsLock     sync.Mutex
+	ranges       map[string]*rangeAccum
+	routerBlocks []RouterBlock
 }
 
 type rangeAccum struct {
@@ -122,6 +131,16 @@ func (s *Store) AddEvent(event AttackEvent) AttackEvent {
 	s.subsLock.Unlock()
 
 	return event
+}
+
+// SetRouterBlocks replaces the dashboard copy of the MikroTik address list.
+// The attack log stays empty across a restart; this list is what remains on the router.
+func (s *Store) SetRouterBlocks(blocks []RouterBlock) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	next := make([]RouterBlock, len(blocks))
+	copy(next, blocks)
+	s.routerBlocks = next
 }
 
 func (s *Store) noteRange(event AttackEvent) {
@@ -215,10 +234,13 @@ func (s *Store) GetStats() Stats {
 	topPaths := getTopN(s.pathStats, 10)
 	topUAs := getTopN(s.uaStats, 10)
 	topIPs := getTopN(s.uniqueIPs, 10)
+	blocks := make([]RouterBlock, len(s.routerBlocks))
+	copy(blocks, s.routerBlocks)
 
 	return Stats{
 		TotalAttacks:    s.nextID,
-		BlockedIPsCount: len(s.uniqueIPs),
+		BlockedIPsCount: len(blocks),
+		RouterBlocks:    blocks,
 		TopPaths:        topPaths,
 		TopUserAgents:   topUAs,
 		TopIPs:          topIPs,

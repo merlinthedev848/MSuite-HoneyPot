@@ -86,7 +86,7 @@
             <div class="card">
                 <div class="card-title">Threat IPs Nullrouted</div>
                 <div class="card-value" style="color: var(--accent-red);" id="stat-blocked">0</div>
-                <div class="card-sub">Active in MikroTik address-list</div>
+                <div class="card-sub">Active on the MikroTik list, including after a restart</div>
             </div>
             <div class="card">
                 <div class="card-title">MikroTik Router</div>
@@ -147,6 +147,14 @@
                     </div>
                 </div>
 
+                <div class="card">
+                    <div class="card-title">Nullrouted on MikroTik</div>
+                    <p style="font-size: 12px; color: var(--text-secondary);">Read from the router. An update does not remove these.</p>
+                    <div id="router-blocks" style="margin-top: 8px;">
+                        <div style="color: var(--text-secondary); font-size: 12px;">Reading the address list...</div>
+                    </div>
+                </div>
+
                 <!-- Top Attackers -->
                 <div class="card">
                     <div class="card-title">Top Scanning IPs</div>
@@ -188,6 +196,7 @@
                 .then(data => {
                     document.getElementById('stat-total').innerText = data.total_attacks || 0;
                     document.getElementById('stat-blocked').innerText = data.blocked_ips_count || 0;
+                    renderRouterBlocks(data.router_blocks);
                     
                     // Top Paths
                     const pathsDiv = document.getElementById('top-paths-list');
@@ -256,6 +265,20 @@
             if (tbody.children.length > 100) {
                 tbody.removeChild(tbody.lastChild);
             }
+        }
+
+        function renderRouterBlocks(blocks) {
+            const el = document.getElementById('router-blocks');
+            if (!el) return;
+            if (!blocks || blocks.length === 0) {
+                el.innerHTML = '<div style="color: var(--text-secondary); font-size: 12px;">No addresses on the MikroTik list.</div>';
+                return;
+            }
+            el.innerHTML = blocks.map(block => {
+                const ip = block.address || '';
+                const timeout = block.timeout ? '<div style="color: var(--text-secondary); font-size: 11px;">' + escapeHtml(block.timeout) + '</div>' : '';
+                return '<div class="list-item"><span class="list-item-title"><strong>' + escapeHtml(ip) + '</strong>' + timeout + '</span><button class="btn btn-danger" style="padding:2px 6px; font-size:10px;" onclick="unblockIP(\'' + escapeHtml(ip) + '\')">Unblock</button></div>';
+            }).join('');
         }
 
         function ownerCell(ev) {

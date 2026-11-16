@@ -49,7 +49,7 @@ func main() {
 	st := store.NewStore(2000)
 	mt := mikrotik.NewClient(cfg)
 
-	// Quick check of MikroTik
+	// Quick check of MikroTik, and reload addresses that are already on the list.
 	go func() {
 		res, err := mt.TestConnection()
 		if err != nil {
@@ -58,6 +58,24 @@ func main() {
 			log.Printf("[MikroTik Connected] Router: %s, Board: %s, Uptime: %s, CPU Load: %s%%",
 				res.Platform, res.Board, res.Uptime, res.CPULoad)
 		}
+		entries, err := mt.ListBlocked()
+		if err != nil {
+			log.Printf("[MikroTik Warning] Could not read address list: %v", err)
+			return
+		}
+		blocks := make([]store.RouterBlock, 0, len(entries))
+		for _, entry := range entries {
+			if entry.Address == "" {
+				continue
+			}
+			blocks = append(blocks, store.RouterBlock{
+				Address: entry.Address,
+				Timeout: entry.Timeout,
+				Comment: entry.Comment,
+			})
+		}
+		st.SetRouterBlocks(blocks)
+		log.Printf("[MikroTik] %s still has %d address-list entries", cfg.MikroTikList, len(blocks))
 	}()
 
 	// 2. Setup Honeypot HTTP Server (port 8080)

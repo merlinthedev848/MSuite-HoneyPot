@@ -49,8 +49,30 @@ func (h *DashboardHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *DashboardHandler) handleStats(w http.ResponseWriter, r *http.Request) {
+	h.syncRouterBlocks()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(h.store.GetStats())
+}
+
+// syncRouterBlocks copies the live MikroTik address list into the dashboard.
+// A failed read keeps the previous copy so a blip does not blank the list.
+func (h *DashboardHandler) syncRouterBlocks() {
+	entries, err := h.mtClient.ListBlocked()
+	if err != nil {
+		return
+	}
+	blocks := make([]store.RouterBlock, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Address == "" {
+			continue
+		}
+		blocks = append(blocks, store.RouterBlock{
+			Address: entry.Address,
+			Timeout: entry.Timeout,
+			Comment: entry.Comment,
+		})
+	}
+	h.store.SetRouterBlocks(blocks)
 }
 
 func (h *DashboardHandler) handleRanges(w http.ResponseWriter, r *http.Request) {

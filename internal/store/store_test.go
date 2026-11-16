@@ -5,6 +5,31 @@ import (
 	"time"
 )
 
+func TestRouterBlocksRemainWithoutAttackLog(t *testing.T) {
+	st := NewStore(10)
+	if st.GetStats().BlockedIPsCount != 0 {
+		t.Fatal("fresh store should not invent nullroutes")
+	}
+	st.SetRouterBlocks([]RouterBlock{
+		{Address: "20.87.218.237", Timeout: "6d23h", Comment: "MSuite Honeypot"},
+		{Address: "203.0.113.10", Timeout: "7d"},
+	})
+	stats := st.GetStats()
+	if stats.TotalAttacks != 0 {
+		t.Fatalf("attack log = %d, want 0 after a restart", stats.TotalAttacks)
+	}
+	if stats.BlockedIPsCount != 2 || len(stats.RouterBlocks) != 2 {
+		t.Fatalf("stats = %+v", stats)
+	}
+	if stats.RouterBlocks[0].Address != "20.87.218.237" {
+		t.Fatalf("first block = %+v", stats.RouterBlocks[0])
+	}
+	stats.RouterBlocks[0].Address = "changed"
+	if st.GetStats().RouterBlocks[0].Address != "20.87.218.237" {
+		t.Fatal("stats leaked the store slice")
+	}
+}
+
 func TestRangesGroupByWHOISPrefix(t *testing.T) {
 	st := NewStore(10)
 	base := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)

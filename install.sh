@@ -25,9 +25,11 @@ cat << "EOF"
 EOF
 echo -e "${NC}"
 
-# Default parameters. RouterOS HTTP REST on port 8728 (plaintext). Not TLS, and not www/www-ssl.
+# Default parameters. HTTP REST is the RouterOS www service (plaintext).
+# On this router www is port 8480. Port 8728 is the binary api, not REST.
+# www-ssl is a different listener. Do not enable TLS for 8480.
 MIKROTIK_HOST="${MIKROTIK_HOST:-}"
-MIKROTIK_PORT="${MIKROTIK_PORT:-8728}"
+MIKROTIK_PORT="${MIKROTIK_PORT:-8480}"
 MIKROTIK_USE_SSL="${MIKROTIK_USE_SSL:-false}"
 MIKROTIK_USER="${MIKROTIK_USER:-admin}"
 MIKROTIK_PASS="${MIKROTIK_PASS:-}"
@@ -53,7 +55,7 @@ while [[ "$#" -gt 0 ]]; do
             echo "Usage: curl -sSL ... | bash -s -- [OPTIONS]"
             echo "Options:"
             echo "  --mikrotik <IP>    MikroTik router IP"
-            echo "  --port <PORT>      MikroTik HTTP REST port (default: 8728, plaintext)"
+            echo "  --port <PORT>      MikroTik www HTTP REST port (default: 8480, plaintext; not binary api 8728)"
             echo "  --user <USER>      MikroTik API user (default: admin)"
             echo "  --pass <PASS>      MikroTik API password"
             echo "  --list <NAME>      Firewall address-list name (default: MSuite-Blacklist)"
@@ -73,8 +75,8 @@ case $ARCH in
     *) echo -e "${RED}[!] Unsupported architecture: $ARCH${NC}"; exit 1 ;;
 esac
 
-# Port 8728 is plaintext HTTP. Never turn TLS on for it.
-if [ "$MIKROTIK_PORT" = "8728" ]; then
+# www port 8480 is plaintext HTTP. Never turn TLS on for it.
+if [ "$MIKROTIK_PORT" = "8480" ]; then
     MIKROTIK_USE_SSL=false
 fi
 
@@ -99,8 +101,8 @@ if [ -z "$MIKROTIK_HOST" ]; then
     MIKROTIK_HOST="192.168.88.1"
 fi
 
-# The interactive prompt can leave port 8728 with a stale SSL flag. Force HTTP.
-if [ "$MIKROTIK_PORT" = "8728" ]; then
+# The interactive prompt can leave port 8480 with a stale SSL flag. Force HTTP.
+if [ "$MIKROTIK_PORT" = "8480" ]; then
     MIKROTIK_USE_SSL=false
 fi
 
@@ -145,8 +147,8 @@ write_honeypot_config() {
 EOF
 }
 
-# Install the raw drop rule over SSH (port 22). Do not touch the api service:
-# port 8728 is already the HTTP REST listener, and the binary API cannot share it.
+# Install the raw drop rule over SSH (port 22). Do not touch ip services.
+# Port 8728 stays the binary api. HTTP REST is the existing www listener.
 # A failure here must not abort the honeypot install.
 routeros_ssh() {
     local remote_cmd=$1

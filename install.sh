@@ -25,10 +25,9 @@ cat << "EOF"
 EOF
 echo -e "${NC}"
 
-# Default parameters. RouterOS binary API (service "api"), not www/www-ssl.
+# Default parameters. RouterOS HTTP REST on port 8728 (plaintext). Not TLS, and not www/www-ssl.
 MIKROTIK_HOST="${MIKROTIK_HOST:-}"
 MIKROTIK_PORT="${MIKROTIK_PORT:-8728}"
-MIKROTIK_PORT_EXPLICIT=0
 MIKROTIK_USE_SSL="${MIKROTIK_USE_SSL:-false}"
 MIKROTIK_USER="${MIKROTIK_USER:-admin}"
 MIKROTIK_PASS="${MIKROTIK_PASS:-}"
@@ -43,8 +42,7 @@ ROUTEROS_CONFIGURED=0
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --mikrotik|--mt-host) MIKROTIK_HOST="$2"; shift ;;
-        --port|--mt-port) MIKROTIK_PORT="$2"; MIKROTIK_PORT_EXPLICIT=1; shift ;;
-        --api-ssl) MIKROTIK_USE_SSL=true ;;
+        --port|--mt-port) MIKROTIK_PORT="$2"; shift ;;
         --user|--mt-user) MIKROTIK_USER="$2"; shift ;;
         --pass|--mt-pass) MIKROTIK_PASS="$2"; shift ;;
         --list|--mt-list) MIKROTIK_LIST="$2"; shift ;;
@@ -55,8 +53,7 @@ while [[ "$#" -gt 0 ]]; do
             echo "Usage: curl -sSL ... | bash -s -- [OPTIONS]"
             echo "Options:"
             echo "  --mikrotik <IP>    MikroTik router IP"
-            echo "  --port <PORT>      MikroTik API port (default: 8728, plaintext api service)"
-            echo "  --api-ssl          Use api-ssl (TLS, port 8729) instead of plaintext api"
+            echo "  --port <PORT>      MikroTik HTTP REST port (default: 8728, plaintext)"
             echo "  --user <USER>      MikroTik API user (default: admin)"
             echo "  --pass <PASS>      MikroTik API password"
             echo "  --list <NAME>      Firewall address-list name (default: MSuite-Blacklist)"
@@ -76,16 +73,16 @@ case $ARCH in
     *) echo -e "${RED}[!] Unsupported architecture: $ARCH${NC}"; exit 1 ;;
 esac
 
-# api-ssl is explicit. Plaintext api on 8728 stays the default.
-if [ "$MIKROTIK_USE_SSL" = "true" ] && [ "$MIKROTIK_PORT_EXPLICIT" != "1" ]; then
-    MIKROTIK_PORT=8729
+# Port 8728 is plaintext HTTP. Never turn TLS on for it.
+if [ "$MIKROTIK_PORT" = "8728" ]; then
+    MIKROTIK_USE_SSL=false
 fi
 
 # Interactive prompt if values missing and terminal is interactive
 if [ -t 0 ] && [ -z "$MIKROTIK_HOST" ]; then
     echo -e "${CYAN}--- MikroTik RouterOS Configuration ---${NC}"
     read -rp "Enter MikroTik IP address [e.g. 192.168.88.1]: " MIKROTIK_HOST
-    read -rp "Enter MikroTik API port [${MIKROTIK_PORT}]: " input_port
+    read -rp "Enter MikroTik HTTP REST port [${MIKROTIK_PORT}]: " input_port
     MIKROTIK_PORT="${input_port:-$MIKROTIK_PORT}"
     read -rp "Enter MikroTik Admin Username [admin]: " input_user
     MIKROTIK_USER="${input_user:-admin}"
@@ -100,6 +97,11 @@ fi
 # Fallback default if still blank
 if [ -z "$MIKROTIK_HOST" ]; then
     MIKROTIK_HOST="192.168.88.1"
+fi
+
+# The interactive prompt can leave port 8728 with a stale SSL flag. Force HTTP.
+if [ "$MIKROTIK_PORT" = "8728" ]; then
+    MIKROTIK_USE_SSL=false
 fi
 
 json_escape() {
@@ -143,20 +145,8 @@ write_honeypot_config() {
 EOF
 }
 
-routeros_service_name() {
-    if [ "$MIKROTIK_USE_SSL" = "true" ]; then
-        printf 'api-ssl'
-    else
-        printf 'api'
-    fi
-}
-
-print_api_enable_line() {
-    echo -e "${YELLOW}    On the router, run this one command:${NC}"
-    echo -e "${CYAN}/ip service set $(routeros_service_name) disabled=no port=${MIKROTIK_PORT}${NC}"
-}
-
-# Enable the API service and install the raw drop rule over SSH (port 22).
+# Install the raw drop rule over SSH (port 22). Do not touch the api service:
+# port 8728 is already the HTTP REST listener, and the binary API cannot share it.
 # A failure here must not abort the honeypot install.
 routeros_ssh() {
     local remote_cmd=$1
@@ -219,17 +209,14 @@ EOF
 
 configure_mikrotik_router() {
     ROUTEROS_CONFIGURED=0
-    local svc port list_q comment_q remote output status
-    svc=$(routeros_service_name)
-    port="$MIKROTIK_PORT"
+    local list_q comment_q remote output status
     list_q=$(ros_dquote "$MIKROTIK_LIST")
     comment_q=$(ros_dquote "MSuite Honeypot: Nullroute Bots & Scanners")
-    remote="/ip service set ${svc} disabled=no port=${port}; :if ([:len [/ip firewall raw find where chain=prerouting src-address-list=${list_q} action=drop]] = 0) do={ /ip firewall raw add chain=prerouting src-address-list=${list_q} action=drop comment=${comment_q} }"
+    remote=":if ([:len [/ip firewall raw find where chain=prerouting src-address-list=${list_q} action=drop]] = 0) do={ /ip firewall raw add chain=prerouting src-address-list=${list_q} action=drop comment=${comment_q} }"
 
-    echo -e "${BLUE}[*] Configuring RouterOS over SSH (${MIKROTIK_HOST}:22): enable ${svc} port ${port} and the raw drop rule...${NC}"
+    echo -e "${BLUE}[*] Configuring RouterOS over SSH (${MIKROTIK_HOST}:22): install the raw drop rule if it is missing...${NC}"
     if ! command -v ssh >/dev/null 2>&1; then
         echo -e "${YELLOW}[!] ssh client is not installed. The honeypot install will continue.${NC}"
-        print_api_enable_line
         return 0
     fi
 
@@ -237,7 +224,7 @@ configure_mikrotik_router() {
     output=$(routeros_ssh "$remote" 2>&1) || status=$?
     if [ "$status" -eq 0 ] && ! printf '%s' "$output" | grep -Eqi 'failure:|syntax error|expected end of command|bad command name|no such item'; then
         ROUTEROS_CONFIGURED=1
-        echo -e "${GREEN}[✔] RouterOS ${svc} port ${port} is enabled and the raw prerouting drop rule is installed.${NC}"
+        echo -e "${GREEN}[✔] Raw prerouting drop rule is installed. HTTP REST stays on port ${MIKROTIK_PORT}.${NC}"
         return 0
     fi
 
@@ -245,13 +232,12 @@ configure_mikrotik_router() {
     if [ -n "$output" ]; then
         printf '%s\n' "$output" | head -n 5 | sed 's/^/    /'
     fi
-    print_api_enable_line
     return 0
 }
 
 print_routeros_followup() {
     if [ "$ROUTEROS_CONFIGURED" = "1" ]; then
-        echo -e "RouterOS:        ${GREEN}$(routeros_service_name) port ${MIKROTIK_PORT} and raw drop rule configured over SSH${NC}"
+        echo -e "RouterOS:        ${GREEN}raw drop rule configured over SSH; REST is http://${MIKROTIK_HOST}:${MIKROTIK_PORT}/rest${NC}"
         return 0
     fi
     echo -e "${YELLOW}Raw drop rule (skip if it already exists):${NC}"
